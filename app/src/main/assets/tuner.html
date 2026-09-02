@@ -1,0 +1,673 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Фоторамка</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#14161c">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Рамка">
+<meta name="mobile-web-app-capable" content="yes">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #14161c; --card: #1e222b; --line: #2c313d;
+    --text: #e8e6e1; --muted: #9aa1ae; --accent: #d9a441; --bad: #d97a6c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 12px 16px 64px;
+    background: var(--bg); color: var(--text);
+    font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  h1 { font-size: 19px; font-weight: 600; margin: 4px 0 10px; }
+  .donate { display: block; margin: 0 0 12px; padding: 11px 14px; border-radius: 12px;
+            background: #241f14; border: 1px solid #4a3c1d; color: var(--accent);
+            font-size: 13.5px; line-height: 1.35; text-decoration: none; }
+  .donate:active { background: #2c2617; }
+  .link { color: var(--accent); text-decoration: none; }
+  .applybar { position: fixed; left: 0; right: 0; bottom: 34px; padding: 10px 16px;
+              background: linear-gradient(transparent, var(--bg) 40%); z-index: 5; }
+  .applybar button { margin-top: 0; border-color: var(--accent); color: var(--accent); }
+  .tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+  .tab { flex: 1; padding: 10px; text-align: center; border-radius: 10px;
+         background: var(--card); border: 1px solid var(--line); color: var(--muted); }
+  .tab.on { color: var(--text); border-color: var(--accent); }
+  .hint { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+  .row { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+         padding: 14px 16px 10px; margin-bottom: 12px; }
+  .head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .name { font-size: 15px; }
+  .value { color: var(--accent); font-variant-numeric: tabular-nums; font-size: 15px; }
+  .note { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  input[type=text] { width: 100%; margin: 10px 0 2px; padding: 12px;
+                     background: #0f1116; color: var(--text); font-size: 14px;
+                     border: 1px solid var(--line); border-radius: 10px;
+                     font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  input[type=range] { width: 100%; margin: 12px 0 2px; accent-color: var(--accent); height: 28px; }
+  button { width: 100%; padding: 14px; margin-top: 8px; font-size: 15px;
+           background: var(--card); color: var(--text);
+           border: 1px solid var(--line); border-radius: 12px; }
+  button:active { background: #262b36; }
+  #install { position: fixed; inset: 0; background: rgba(10,11,15,.92); z-index: 10;
+              display: flex; align-items: center; justify-content: center; padding: 18px; }
+  /* Правило по идентификатору сильнее браузерного [hidden]{display:none}, и без
+     этой строки окошко не закрывалось: атрибут ставился, а display оставался
+     flex. */
+  #install[hidden] { display: none; }
+  #install .sheet { background: var(--card); border: 1px solid var(--line);
+                    border-radius: 16px; padding: 20px; max-width: 460px; max-height: 88vh;
+                    overflow: auto; }
+  #install h2 { font-size: 18px; margin: 0 0 8px; }
+  #install p { color: var(--muted); font-size: 14px; margin: 6px 0 0; }
+  #install .os { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+  #install .os b { font-size: 15px; }
+  #install .os.dim { opacity: .45; }
+  #status { position: fixed; left: 0; right: 0; bottom: 0; padding: 8px 16px;
+            background: #0f1116; border-top: 1px solid var(--line);
+            color: var(--muted); font-size: 12px; }
+  .kv { display: flex; justify-content: space-between; padding: 3px 0; font-size: 14px; }
+  .kv span:last-child { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .bar { height: 8px; background: #0f1116; border-radius: 4px; overflow: hidden; margin-top: 8px; }
+  .bar i { display: block; height: 100%; background: var(--accent); }
+  .hours { display: flex; align-items: flex-end; gap: 2px; height: 70px; margin-top: 10px; }
+  .hours i { flex: 1; background: var(--accent); min-height: 1px; border-radius: 2px 2px 0 0; opacity: .85; }
+  .hours i.zero { background: var(--line); }
+  .hlabels { display: flex; justify-content: space-between; color: var(--muted);
+             font-size: 11px; margin-top: 4px; }
+  .list { font-size: 12.5px; line-height: 1.5; color: var(--muted);
+          font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+          max-height: 260px; overflow: auto; }
+  .list div { padding: 1px 0; }
+  .list .bad { color: var(--bad); }
+  .empty { color: var(--muted); font-size: 13px; }
+  .tree { font-size: 15px; }
+  .treebar { display: flex; gap: 8px; margin-bottom: 10px; }
+  .treebar .small { margin-top: 0; padding: 10px; font-size: 14px; }
+  .node { display: flex; align-items: center; gap: 10px; padding: 9px 2px; }
+  .node .arrow { width: 22px; color: var(--muted); text-align: center; flex: none; }
+  .node .box { width: 24px; flex: none; color: var(--muted); }
+  .node.on > .box { color: var(--accent); }
+  .node.inherited { color: var(--muted); }
+  .node .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .children { margin-left: 22px; border-left: 1px solid var(--line); padding-left: 8px; }
+</style>
+</head>
+<body>
+<a class="donate" href="https://www.tbank.ru/cf/BcjzatrF9O" target="_blank" rel="noopener">
+  Понравилась рамка? Присылайте на чай — это помогает её улучшать. Задонатить →
+</a>
+<h1>Фоторамка</h1>
+<div class="tabs">
+  <div class="tab on" data-view="tune">Настройка</div>
+  <div class="tab" data-view="folders">Папки</div>
+  <div class="tab" data-view="state">Состояние</div>
+</div>
+
+<div id="tune">
+  <div class="hint">Двигайте ползунок — экран меняется сразу, выходить из заставки не нужно.</div>
+  <div class="row">
+    <div class="head"><span class="name">Папка на Яндекс.Диске</span></div>
+    <div class="note">публичная ссылка; смена папки сбрасывает индекс и кэш</div>
+    <input type="text" id="folder" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <button id="savefolder">Сменить папку</button>
+  </div>
+  <div id="toggles"></div>
+  <div id="rows"></div>
+  <button id="reset">Вернуть значения по умолчанию</button>
+</div>
+
+<div id="folders" hidden>
+  <div class="hint">Отметьте папки, которые показывать. Отмеченная включает и всё
+    вложенное. Не отмечено ничего — показывается вся директория целиком.</div>
+  <div class="hint" id="folderage"></div>
+  <div class="treebar">
+    <button class="small" id="expandall">⊞ Развернуть всё</button>
+    <button class="small" id="collapseall">⊟ Свернуть всё</button>
+  </div>
+  <div class="row"><div id="tree" class="tree"></div></div>
+  <button id="applyfolders">Применить</button>
+  <div class="applybar" id="applybar" hidden>
+    <button id="applyfloat">Применить отбор</button>
+  </div>
+  <button id="clearfolders">Показывать всё</button>
+  <div class="hint" style="margin-top:14px">
+    Раскрытые ветки запоминаются сами. Эта кнопка обходит <b>всё дерево</b>
+    целиком — нужна редко и работает долго. Снимки она не перечитывает: за них
+    отвечает «Перечитать снимки» на вкладке «Состояние».
+  </div>
+  <button id="rescanfolders">Обновить дерево папок</button>
+</div>
+
+<div id="state" hidden>
+  <div class="row">
+    <div class="name">Библиотека</div>
+    <div id="index"></div>
+  </div>
+  <div class="row">
+    <div class="name">Кэш</div>
+    <div id="cache"></div>
+    <div class="bar"><i id="cachebar"></i></div>
+  </div>
+  <div class="row">
+    <div class="name">Показы по часам суток</div>
+    <div class="note">когда рамка вообще работает</div>
+    <div class="hours" id="hours"></div>
+    <div class="hlabels"><span>0</span><span>6</span><span>12</span><span>18</span><span>23</span></div>
+  </div>
+  <div class="row">
+    <div class="name">Очередь</div>
+    <div class="note">что покажется дальше</div>
+    <div class="list" id="queue"></div>
+  </div>
+  <div class="row">
+    <div class="name">Не удалось подготовить</div>
+    <div class="list" id="failures"></div>
+  </div>
+  <div class="row">
+    <div class="name">Журнал</div>
+    <div class="list" id="log"></div>
+  </div>
+  <div class="hint" style="margin-top:14px">
+    Перечитывает <b>снимки</b> внутри уже выбранных папок: находит добавленные,
+    убирает удалённые. Дерево папок при этом не меняется.
+  </div>
+  <button id="refresh">Перечитать снимки</button>
+  <div class="hint" style="margin-top:22px;text-align:center">
+    Исходники, релизы и что нового —
+    <a class="link" href="https://github.com/nikallass/ya-photo-frame" target="_blank"
+       rel="noopener">github.com/nikallass/ya-photo-frame</a>
+  </div>
+</div>
+
+<div id="install" hidden>
+  <div class="sheet">
+    <h2>Сохраните страницу на телефон</h2>
+    <p>Иначе адрес придётся искать заново — он привязан к телевизору и нигде больше
+      не записан. На заставке его можно вспомнить кнопками ↑ или ↓ на пульте.</p>
+    <div class="os" id="os-ios">
+      <b>iPhone, Safari</b>
+      <p>Кнопка «Поделиться» внизу → <b>«На экран Домой»</b> → «Добавить».
+        Откроется во весь экран, как обычное приложение.</p>
+    </div>
+    <div class="os" id="os-android">
+      <b>Android, Chrome</b>
+      <p>Меню «⋮» справа вверху → <b>«Добавить на главный экран»</b>.</p>
+    </div>
+    <div class="os" id="os-other">
+      <b>Компьютер</b>
+      <p>Добавьте страницу в закладки — Ctrl+D или Cmd+D.</p>
+    </div>
+    <button id="installok">Понятно</button>
+  </div>
+</div>
+
+<div id="status">загрузка…</div>
+
+<script>
+// Интервал показа удобнее крутить по логарифму: у нижнего края диапазона важны
+// секунды, у верхнего — минуты, и линейная шкала от 5 секунд до часа делает
+// короткие интервалы неуправляемыми.
+const logScale = {
+  toSlider: v => Math.round(1000 * Math.log(v / 5) / Math.log(720)),
+  fromSlider: s => Math.round(5 * Math.pow(720, s / 1000)),
+};
+
+const FIELDS = [
+  { key: 'videoMaxDurationMillis', name: 'Ролик не дольше', note: '0 — до конца, сколько бы ни длился',
+    min: 0, max: 1800, step: 10,
+    get: v => Math.round(v / 1000), set: s => s * 1000,
+    show: v => v === 0 ? 'без ограничения'
+      : (v < 60000 ? Math.round(v/1000) + ' с' : (v/60000).toFixed(v % 60000 ? 1 : 0) + ' мин') },
+
+  { key: 'showDurationMillis', name: 'Интервал показа', note: 'от 5 секунд до часа',
+    min: 0, max: 1000, step: 1,
+    get: v => logScale.toSlider(v / 1000), set: s => logScale.fromSlider(s) * 1000,
+    show: v => { const s = v / 1000;
+      return s < 60 ? s + ' с' : (s % 60 === 0 ? (s / 60) + ' мин' : (s / 60).toFixed(1) + ' мин'); } },
+
+  { key: 'crossfadeMillis', name: 'Переход', note: 'сколько длится смена кадра',
+    min: 0, max: 5000, step: 100, get: v => v, set: s => s,
+    show: v => (v / 1000).toFixed(1) + ' с' },
+
+  { key: 'driftAmplitude', name: 'Длина хода', note: 'насколько далеко уезжает кадр всего',
+    min: 0, max: 300, step: 1, get: v => Math.round(v * 1000), set: s => s / 1000,
+    show: v => (v * 100).toFixed(1) + ' % ширины' },
+
+  { key: 'driftSpeedPerMinute', name: 'Скорость хода', note: 'сколько проходит за минуту',
+    min: 0, max: 600, step: 1, get: v => Math.round(v * 1000), set: s => s / 1000,
+    show: v => (v * 100).toFixed(1) + ' % в минуту' },
+
+  { key: 'frameInset', name: 'Размер кадра', note: 'доля экрана, в которую вписан снимок',
+    min: 30, max: 100, step: 1, get: v => Math.round(v * 100), set: s => s / 100,
+    show: v => Math.round(v * 100) + ' %' },
+
+  { key: 'placementStrength', name: 'Смещение от центра', note: '0 — по центру, 1 — точка золотого сечения',
+    min: 0, max: 100, step: 5, get: v => Math.round(v * 100), set: s => s / 100,
+    show: v => Math.round(v * 100) + ' %' },
+
+  { key: 'edgeMargin', name: 'Отступ от края', note: 'ограничивает смещение и длину хода',
+    min: 0, max: 25, step: 1, get: v => Math.round(v * 100), set: s => s / 100,
+    show: v => Math.round(v * 100) + ' %' },
+
+  { key: 'backgroundDim', name: 'Затемнение фона', note: '0 — как есть, 100 — чёрный',
+    min: 0, max: 100, step: 5, get: v => Math.round(v * 100), set: s => s / 100,
+    show: v => Math.round(v * 100) + ' %' },
+
+  { key: 'blurSampleLongSide', name: 'Размытие фона', note: 'меньше пикселей — сильнее размыто',
+    min: 2, max: 64, step: 1, get: v => v, set: s => s, show: v => v + ' пикс.' },
+
+  { key: 'freshnessWindowDays', name: 'Считать свежим', note: 'сколько дней после заливки снимок выпадает чаще',
+    min: 1, max: 730, step: 1, get: v => v, set: s => s,
+    show: v => v < 60 ? v + ' дн.' : (v/30).toFixed(0) + ' мес.' },
+
+  { key: 'cacheBudgetBytes', name: 'Объём кэша', note: 'сколько места отдано под скачанное',
+    min: 64, max: 8192, step: 64,
+    get: v => Math.round(v / 1048576), set: s => s * 1048576,
+    show: v => v >= 1073741824 ? (v / 1073741824).toFixed(1) + ' ГБ' : Math.round(v / 1048576) + ' МБ' },
+
+  { key: 'cacheItemThresholdBytes', name: 'Порог кэширования', note: 'что тяжелее — играется потоком',
+    min: 1, max: 2048, step: 1,
+    get: v => Math.round(v / 1048576), set: s => s * 1048576,
+    show: v => Math.round(v / 1048576) + ' МБ' },
+
+  { key: 'prefetchCount', name: 'Предзагрузка', note: 'на сколько кадров вперёд готовиться',
+    min: 1, max: 50, step: 1, get: v => v, set: s => s, show: v => v + ' кадр(ов)' },
+
+  { key: 'indexRefreshIntervalMillis', name: 'Переобход папки', note: 'не чаще чем раз в',
+    min: 1, max: 1440, step: 1,
+    get: v => Math.round(v / 60000), set: s => s * 60000,
+    show: v => { const m = Math.round(v / 60000);
+      return m < 60 ? m + ' мин' : (m / 60).toFixed(m % 60 ? 1 : 0) + ' ч'; } },
+];
+
+const TOGGLES = [
+  { key: 'showVideo', name: 'Видео', note: 'показывать ролики наравне со снимками' },
+  { key: 'videoSoundEnabled', name: 'Звук в роликах', note: 'по умолчанию выключен' },
+  { key: 'pairPortraits', name: 'Пары вертикальных', note: 'два снимка рядом заполняют экран' },
+  { key: 'showClock', name: 'Часы', note: 'поверх кадра' },
+  { key: 'showDate', name: 'Дата съёмки', note: 'поверх кадра' },
+];
+
+const state = {}, inputs = {};
+const rows = document.getElementById('rows'), status = document.getElementById('status');
+
+for (const f of FIELDS) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML = '<div class="head"><span class="name">' + f.name + '</span>' +
+    '<span class="value" id="v-' + f.key + '">—</span></div>' +
+    '<div class="note">' + f.note + '</div>';
+  const input = document.createElement('input');
+  input.type = 'range'; input.min = f.min; input.max = f.max; input.step = f.step;
+  input.addEventListener('input', () => {
+    state[f.key] = f.set(Number(input.value)); paint(f); schedule();
+  });
+  row.appendChild(input); rows.appendChild(row); inputs[f.key] = input;
+}
+
+const togglesBox = document.getElementById('toggles');
+for (const t of TOGGLES) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML = '<div class="head"><span class="name">' + t.name + '</span>' +
+    '<span class="value" id="v-' + t.key + '">—</span></div>' +
+    '<div class="note">' + t.note + '</div>';
+  row.addEventListener('click', () => { state[t.key] = !state[t.key]; paintToggle(t); schedule(); });
+  togglesBox.appendChild(row);
+}
+
+const paintToggle = t =>
+  document.getElementById('v-' + t.key).textContent = state[t.key] ? 'включено' : 'выключено';
+
+const paint = f => document.getElementById('v-' + f.key).textContent = f.show(state[f.key]);
+
+function render(data) {
+  Object.assign(state, data);
+  const folder = document.getElementById('folder');
+  if (document.activeElement !== folder) folder.value = state.folderUrl || '';
+  for (const f of FIELDS) { inputs[f.key].value = f.get(state[f.key]); paint(f); }
+  for (const t of TOGGLES) paintToggle(t);
+}
+
+let timer = null;
+function schedule() {
+  status.textContent = 'применяю…';
+  clearTimeout(timer);
+  timer = setTimeout(() => { timer = null; send(); }, 120);
+}
+
+async function send() {
+  // Ссылку сюда не кладём: она меняется отдельной кнопкой, иначе любое
+  // движение ползунка перезапускало бы рамку.
+  const body = FIELDS.concat(TOGGLES)
+    .map(f => f.key + '=' + encodeURIComponent(state[f.key])).join('&');
+  try {
+    const res = await fetch('/api/settings', { method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
+    render(await res.json());
+    status.textContent = 'применено ' + new Date().toLocaleTimeString('ru-RU');
+  } catch (e) { status.textContent = 'не достучался до телевизора'; }
+}
+
+document.getElementById('savefolder').addEventListener('click', async () => {
+  const url = document.getElementById('folder').value.trim();
+  if (!url || !confirm('Индекс и кэш прежней папки будут удалены. Меняем?')) return;
+  status.textContent = 'меняю папку…';
+  const res = await fetch('/api/settings', { method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'folderUrl=' + encodeURIComponent(url) });
+  render(await res.json());
+  status.textContent = 'папка сменена, рамка начинает заново';
+});
+
+document.getElementById('reset').addEventListener('click', async () => {
+  render(await (await fetch('/api/reset', { method: 'POST' })).json());
+  status.textContent = 'вернул значения по умолчанию';
+});
+
+document.getElementById('refresh').addEventListener('click', async () => {
+  status.textContent = 'перечитываю снимки…';
+  await fetch('/api/refresh', { method: 'POST' });
+  setTimeout(loadState, 1500);
+});
+
+// ── вкладка папок ──────────────────────────────────────────────────────────
+
+// Дерево держится явной моделью, а не состоянием DOM: «развернуть всё» тогда
+// становится изменением набора раскрытых узлов, а не обходом стрелок.
+// Раскрывается оно по одному уровню — обходить директорию целиком ради списка
+// папок значило бы ждать десятки секунд при каждом открытии страницы.
+let selected = new Set();
+let expanded = new Set(['/']);
+const loaded = new Map();
+
+const isInherited = path =>
+  [...selected].some(s => s !== path && path.startsWith(s === '/' ? '/' : s + '/'));
+
+let foldersBuiltAt = 0, foldersKnown = 0;
+
+async function childrenOf(path) {
+  if (!loaded.has(path)) {
+    const res = await fetch('/api/folders?path=' + encodeURIComponent(path));
+    const data = await res.json();
+    loaded.set(path, data.folders || []);
+    foldersBuiltAt = data.builtAt || 0;
+    foldersKnown = data.known || 0;
+  }
+  return loaded.get(path);
+}
+
+function showFolderAge() {
+  const box = document.getElementById('folderage');
+  box.textContent = foldersBuiltAt
+    ? 'Запомнено папок: ' + foldersKnown + '. Раз раскрытый уровень открывается ' +
+      'мгновенно и без обращения к Диску; новые папки в нём появятся после обновления.'
+    : 'Дерево раскрывается по одному уровню и запоминается: второй раз этот же ' +
+      'уровень откроется мгновенно.';
+}
+
+function nodeView(name, path, depth) {
+  const wrap = document.createElement('div');
+  const row = document.createElement('div');
+  row.className = 'node';
+  const inherited = isInherited(path);
+  const checked = selected.has(path) || inherited;
+  if (selected.has(path)) row.classList.add('on');
+  if (inherited) row.classList.add('inherited');
+
+  const kids = loaded.get(path);
+  const open = expanded.has(path);
+  const arrow = kids && kids.length === 0 ? '·' : open ? '▾' : '▸';
+
+  row.innerHTML = '<span class="arrow">' + arrow + '</span>' +
+    '<span class="box">' + (checked ? '☑' : '☐') + '</span>' +
+    '<span class="label"></span>';
+  row.querySelector('.label').textContent = name;
+
+  row.querySelector('.arrow').addEventListener('click', async event => {
+    event.stopPropagation();
+    if (expanded.has(path)) expanded.delete(path);
+    else { expanded.add(path); await childrenOf(path); }
+    drawTree();
+  });
+
+  row.addEventListener('click', () => {
+    if (isInherited(path)) {
+      status.textContent = 'уже входит в отмеченную папку выше';
+      return;
+    }
+    if (selected.has(path)) selected.delete(path); else selected.add(path);
+    drawTree();
+  });
+
+  wrap.appendChild(row);
+  if (open && kids) {
+    const box = document.createElement('div');
+    box.className = 'children';
+    for (const f of kids) box.appendChild(nodeView(f.name, f.path, depth + 1));
+    wrap.appendChild(box);
+  }
+  return wrap;
+}
+
+// Что применено на телевизоре — чтобы понимать, есть ли несохранённые правки.
+let appliedSelection = '';
+const selectionKey = () => [...selected].sort().join('\n');
+
+function updateApplyBar() {
+  // Плавающая кнопка нужна, только пока отбор отличается от применённого:
+  // дерево бывает длинным, и до кнопки внизу долго листать.
+  const dirty = selectionKey() !== appliedSelection;
+  document.getElementById('applybar').hidden = !dirty || view !== 'folders';
+}
+
+function drawTree() {
+  const tree = document.getElementById('tree');
+  tree.innerHTML = '';
+  tree.appendChild(nodeView('Вся директория', '/', 0));
+  updateApplyBar();
+  status.textContent = selected.size
+    ? 'отмечено папок: ' + selected.size
+    : 'ничего не отмечено — показывается всё';
+}
+
+async function renderTree() {
+  // Раскрываем путь к каждой отмеченной папке: иначе владелец видит корень и
+  // не понимает, отмечено ли хоть что-то и где именно.
+  expanded = new Set(['/']);
+  for (const path of selected) {
+    const parts = path.split('/').filter(Boolean);
+    let acc = '';
+    for (const part of parts) { expanded.add(acc || '/'); acc += '/' + part; }
+    expanded.add(path);
+  }
+  for (const path of expanded) await childrenOf(path);
+  showFolderAge();
+  drawTree();
+}
+
+// Раскрываем вширь и с потолком по числу запросов: у большой директории
+// «развернуть всё» иначе превратилось бы в сотни обращений и минуты ожидания.
+document.getElementById('expandall').addEventListener('click', async () => {
+  // Пока список папок не собран, каждое раскрытие — обращение к Диску, и
+  // разворачивать всё подряд накладно. По собранному списку ограничений нет.
+  let budget = foldersBuiltAt ? 100000 : 80;
+  let level = ['/'];
+  while (level.length && budget > 0) {
+    const next = [];
+    for (const path of level) {
+      if (budget-- <= 0) break;
+      expanded.add(path);
+      status.textContent = 'разворачиваю… осталось запросов: ' + budget;
+      for (const f of await childrenOf(path)) next.push(f.path);
+    }
+    level = next;
+  }
+  drawTree();
+  if (budget <= 0) {
+    status.textContent = foldersBuiltAt
+      ? 'развернул, сколько успел — дерево очень большое'
+      : 'развернул, сколько успел. Обновите дерево папок — тогда развернётся всё сразу';
+  }
+});
+
+document.getElementById('rescanfolders').addEventListener('click', async () => {
+  if (!confirm('Дерево обойдётся целиком и запомнится. На большом Диске это ' +
+               'сотни обращений и добрый десяток минут — обычно достаточно просто ' +
+               'раскрывать нужные ветки, они запоминаются сами. Всё равно начинаем?')) return;
+  await fetch('/api/rescan-folders', { method: 'POST' });
+  status.textContent = 'обновляю дерево папок в фоне — загляните сюда через пару минут';
+});
+
+document.getElementById('collapseall').addEventListener('click', () => {
+  expanded = new Set(['/']);
+  drawTree();
+});
+
+async function applyFolders() {
+  status.textContent = 'применяю…';
+  const res = await fetch('/api/settings', { method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'selectedFolders=' + encodeURIComponent([...selected].join('\n')) });
+  render(await res.json());
+  appliedSelection = selectionKey();
+  updateApplyBar();
+  status.textContent = 'отбор применён, рамка обходит папку заново';
+}
+document.getElementById('applyfolders').addEventListener('click', applyFolders);
+document.getElementById('applyfloat').addEventListener('click', applyFolders);
+
+document.getElementById('clearfolders').addEventListener('click', async () => {
+  selected = new Set();
+  await fetch('/api/settings', { method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'selectedFolders=' });
+  appliedSelection = selectionKey();
+  drawTree();
+});
+
+// ── вкладка состояния ──────────────────────────────────────────────────────
+
+let view = 'tune', poll = null;
+for (const tab of document.querySelectorAll('.tab')) {
+  tab.addEventListener('click', () => {
+    view = tab.dataset.view;
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t === tab));
+    for (const id of ['tune', 'folders', 'state']) {
+      document.getElementById(id).hidden = view !== id;
+    }
+    clearInterval(poll);
+    if (view === 'state') { loadState(); poll = setInterval(loadState, 4000); }
+    if (view === 'folders') {
+      selected = new Set(state.selectedFolders || []);
+      appliedSelection = selectionKey();
+      renderTree();
+    }
+    updateApplyBar();
+  });
+}
+
+const bytes = n => n >= 1073741824 ? (n / 1073741824).toFixed(2) + ' ГБ'
+  : n >= 1048576 ? (n / 1048576).toFixed(1) + ' МБ' : Math.round(n / 1024) + ' КБ';
+const kv = (k, v) => '<div class="kv"><span>' + k + '</span><span>' + v + '</span></div>';
+const list = (items, bad) => items.length
+  ? items.map(x => '<div' + (bad ? ' class="bad"' : '') + '>' + escapeHtml(x) + '</div>').join('')
+  : '<div class="empty">пусто</div>';
+const escapeHtml = s => s.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+
+async function loadState() {
+  try {
+    const d = await (await fetch('/api/state')).json();
+    const i = d.index, c = d.cache;
+    document.getElementById('index').innerHTML =
+      kv('всего файлов', i.total) + kv('фотографий', i.photos) + kv('видео', i.videos) +
+      kv('нечем показать', i.unshowable) + kv('показано хоть раз', i.shown) +
+      kv('последний обход', i.syncedAt ? new Date(i.syncedAt).toLocaleString('ru-RU') : 'не было');
+    document.getElementById('cache').innerHTML =
+      kv('занято', bytes(c.usedBytes)) + kv('из', bytes(c.budgetBytes)) + kv('файлов', c.files);
+    document.getElementById('cachebar').style.width =
+      Math.min(100, c.budgetBytes ? c.usedBytes / c.budgetBytes * 100 : 0) + '%';
+
+    const peak = Math.max(1, ...d.hourly);
+    document.getElementById('hours').innerHTML = d.hourly
+      .map(v => '<i class="' + (v ? '' : 'zero') + '" style="height:' +
+        Math.max(2, v / peak * 100) + '%" title="' + v + '"></i>').join('');
+
+    document.getElementById('queue').innerHTML = list(d.queue);
+    document.getElementById('failures').innerHTML = list(d.failures || [], true);
+    document.getElementById('log').innerHTML = list(d.log);
+    status.textContent = 'показов всего: ' + d.shows + ' · обновлено ' +
+      new Date().toLocaleTimeString('ru-RU');
+  } catch (e) { status.textContent = 'не достучался до телевизора'; }
+}
+
+// Служебный работник живёт только в защищённом контексте: по обычному http
+// браузер его не зарегистрирует. Значок на телефон при этом добавляется всё
+// равно — на iOS полноэкранным приложением, на Android ярлыком.
+if ('serviceWorker' in navigator && window.isSecureContext) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
+// Подсказку про сохранение показываем один раз: адрес привязан к телевизору и
+// нигде больше не записан, а через месяц его никто не вспомнит.
+(function offerInstall() {
+  const KEY = 'frame-install-hint-shown';
+  const standalone = window.matchMedia('(display-mode: standalone)').matches ||
+    window.navigator.standalone === true;
+  let seen = false;
+  try { seen = localStorage.getItem(KEY) === '1'; } catch (e) { seen = false; }
+  if (seen || standalone) return;
+
+  const ua = navigator.userAgent;
+  const ios = /iPhone|iPad|iPod/.test(ua);
+  const android = /Android/.test(ua);
+  // Чужую систему не прячем совсем, а приглушаем: телефон может отдавать
+  // неожиданный user-agent, и остаться вовсе без инструкции хуже.
+  if (ios || android) {
+    document.getElementById('os-ios').classList.toggle('dim', !ios);
+    document.getElementById('os-android').classList.toggle('dim', !android);
+    document.getElementById('os-other').classList.add('dim');
+  } else {
+    document.getElementById('os-ios').classList.add('dim');
+    document.getElementById('os-android').classList.add('dim');
+  }
+
+  const box = document.getElementById('install');
+  box.hidden = false;
+  document.getElementById('installok').addEventListener('click', () => {
+    box.hidden = true;
+    try { localStorage.setItem(KEY, '1'); } catch (e) { /* приватный режим */ }
+  });
+})();
+
+async function loadSettings() {
+  try {
+    render(await (await fetch('/api/settings')).json());
+    return true;
+  } catch (e) { status.textContent = 'не достучался до телевизора'; return false; }
+}
+
+// Установленное на телефон приложение не умеет «потянуть вниз, чтобы
+// обновить», а страницу держат открытой сутками. Поэтому подтягиваем
+// настройки при каждом возвращении на неё и раз в пятнадцать секунд —
+// кроме моментов, когда ползунок в руках, иначе он дёргался бы.
+let dragging = false;
+document.addEventListener('pointerdown', e => { if (e.target.type === 'range') dragging = true; });
+document.addEventListener('pointerup', () => { dragging = false; });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  loadSettings();
+  if (view === 'state') loadState();
+});
+setInterval(() => { if (!dragging && timer === null && view === 'tune') loadSettings(); }, 15000);
+
+(async () => {
+  if (await loadSettings()) status.textContent = 'готов';
+})();
+</script>
+</body>
+</html>

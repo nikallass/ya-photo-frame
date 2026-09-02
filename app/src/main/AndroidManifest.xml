@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Рассчитано на телевизор, но заставка есть и на планшетах: ни тачскрин,
+         ни Leanback не обязательны, чтобы APK ставился и туда. -->
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="false" />
+    <uses-feature
+        android:name="android.software.leanback"
+        android:required="false" />
+
+    <application
+        android:allowBackup="true"
+        android:banner="@drawable/banner"
+        android:icon="@drawable/banner"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.YaPhotoFrame">
+
+        <!-- Точка входа в лаунчере телевизора. Пока только подсказка,
+             как выбрать приложение заставкой. -->
+        <activity
+            android:name=".SetupActivity"
+            android:exported="true"
+            android:screenOrientation="landscape">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Настройка с ноутбука: третий канал наравне с экраном и страницей.
+             Экспортирован намеренно — иначе adb до него не достучится. -->
+        <receiver
+            android:name=".settings.SettingsReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="ru.dvedev.me.yaphotoframe.SET" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Собственно заставка -->
+        <service
+            android:name=".FrameDreamService"
+            android:exported="true"
+            android:permission="android.permission.BIND_DREAM_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.dreams.DreamService" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.dream"
+                android:resource="@xml/dream_info" />
+        </service>
+    </application>
+</manifest>
