@@ -76,6 +76,8 @@ class SettingsReceiver : BroadcastReceiver() {
                 raw.toBooleanStrictOrNull()?.let { settings.copy(pairPortraits = it) }
             "freshnessWindowDays" ->
                 raw.toIntOrNull()?.let { settings.copy(freshnessWindowDays = it) }
+            "minPhotoFraction" ->
+                raw.toFloatOrNull()?.let { settings.copy(minPhotoFraction = it) }
             "showClock" -> raw.toBooleanStrictOrNull()?.let { settings.copy(showClock = it) }
             "showDate" -> raw.toBooleanStrictOrNull()?.let { settings.copy(showDate = it) }
             else -> null

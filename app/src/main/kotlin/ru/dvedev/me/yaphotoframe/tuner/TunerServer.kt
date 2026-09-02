@@ -268,6 +268,8 @@ class TunerServer(
                     ?: current.pairPortraits,
                 freshnessWindowDays = values["freshnessWindowDays"]?.toIntOrNull()
                     ?: current.freshnessWindowDays,
+                minPhotoFraction = values["minPhotoFraction"]?.toFloatOrNull()
+                    ?: current.minPhotoFraction,
                 showClock = values["showClock"]?.toBooleanStrictOrNull() ?: current.showClock,
                 showDate = values["showDate"]?.toBooleanStrictOrNull() ?: current.showDate,
                 // Пустое значение — законный выбор «вся папка целиком»,
@@ -305,6 +307,7 @@ class TunerServer(
         append("\"videoSoundEnabled\":").append(settings.videoSoundEnabled).append(',')
         append("\"pairPortraits\":").append(settings.pairPortraits).append(',')
         append("\"freshnessWindowDays\":").append(settings.freshnessWindowDays).append(',')
+        append("\"minPhotoFraction\":").append(settings.minPhotoFraction).append(',')
         append("\"showClock\":").append(settings.showClock).append(',')
         append("\"showDate\":").append(settings.showDate).append(',')
         append("\"selectedFolders\":").append(

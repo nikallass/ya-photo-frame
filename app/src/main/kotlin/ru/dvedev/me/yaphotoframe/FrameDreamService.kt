@@ -1,5 +1,6 @@
 package ru.dvedev.me.yaphotoframe
 
+import android.graphics.BitmapFactory
 import android.service.dreams.DreamService
 import android.util.Log
 import android.view.KeyEvent
@@ -251,6 +252,20 @@ class FrameDreamService : DreamService() {
         startSlideshow()
     }
 
+    /** Порог мелкости в пикселях: доля из настроек от длинной стороны экрана. */
+    private fun minPhotoLongSide(): Int {
+        val metrics = resources.displayMetrics
+        val longSide = maxOf(metrics.widthPixels, metrics.heightPixels)
+        return (store.current.minPhotoFraction * longSide).toInt()
+    }
+
+    /** Длинная сторона картинки без декодирования самой картинки. */
+    private fun imageLongSide(file: File): Int? {
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.path, options)
+        return maxOf(options.outWidth, options.outHeight).takeIf { it > 0 }
+    }
+
     private suspend fun runSlideshow() {
         try {
             ensureSlideshowView()
@@ -279,6 +294,8 @@ class FrameDreamService : DreamService() {
                 fetcher = MediaFetcher(Http.client, cache),
                 policy = { store.current.cachePolicy() },
                 includeVideo = { store.current.showVideo },
+                minPhotoLongSide = ::minPhotoLongSide,
+                measure = { _, file -> imageLongSide(file) },
                 tuning = {
                     PlaylistTuning(
                         freshnessWindowMillis =
@@ -294,6 +311,7 @@ class FrameDreamService : DreamService() {
                 previewFile = engine::previewFile,
                 deliver = engine::deliver,
                 settings = { store.current },
+                minLongSide = ::minPhotoLongSide,
             )
 
             // Холодный старт: показать хоть что-нибудь, не дожидаясь обхода.
@@ -579,6 +597,7 @@ class FrameDreamService : DreamService() {
             append("\"unshowable\":").append(index?.unshowable ?: 0).append(',')
             append("\"shown\":").append(index?.shown ?: 0).append(',')
             append("\"failed\":").append(index?.failed ?: 0).append(',')
+            append("\"tooSmall\":").append(index?.tooSmall ?: 0).append(',')
             append("\"syncedAt\":").append(index?.syncedAtMillis ?: 0)
             append("},")
             append("\"cache\":{")

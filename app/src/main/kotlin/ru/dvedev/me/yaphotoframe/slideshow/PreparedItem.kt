@@ -79,6 +79,8 @@ class FramePreparer(
     private val previewFile: suspend (MediaItem, PreviewSize) -> File,
     private val deliver: suspend (MediaItem) -> Delivery,
     private val settings: () -> FrameSettings,
+    /** Мельче скольких пикселей по длинной стороне снимок не показывать; ноль — всё. */
+    private val minLongSide: () -> Int = { 0 },
 ) {
     suspend fun prepare(item: MediaItem): PreparedItem = withContext(Dispatchers.IO) {
         val background = backgroundFor(item)
@@ -92,7 +94,7 @@ class FramePreparer(
                 )
                 MediaKind.PHOTO -> PreparedPhoto(
                     item = item,
-                    frame = decode(previewFile(item, PreviewSize.FULL)),
+                    frame = decodePhoto(previewFile(item, PreviewSize.FULL)),
                     background = background,
                 )
             }
@@ -123,6 +125,22 @@ class FramePreparer(
         } finally {
             micro.recycle()
         }
+    }
+
+    /**
+     * Снимок, который на экране не станет почтовой маркой.
+     *
+     * Движок отсеивает мелочь ещё в очереди, но кадр, взятый до измерения,
+     * сюда доходит — и лучше пропустить его здесь, чем показать.
+     */
+    private fun decodePhoto(file: File): Bitmap {
+        val bitmap = decode(file)
+        val minimum = minLongSide()
+        if (minimum > 0 && maxOf(bitmap.width, bitmap.height) < minimum) {
+            bitmap.recycle()
+            throw IOException("мельче порога: ${bitmap.width}×${bitmap.height} < $minimum")
+        }
+        return bitmap
     }
 
     private fun decode(file: File): Bitmap =

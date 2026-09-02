@@ -24,6 +24,7 @@ import ru.dvedev.me.yaphotoframe.cache.MediaCache
 import ru.dvedev.me.yaphotoframe.cache.MediaFetcher
 import ru.dvedev.me.yaphotoframe.library.FolderIndexStore
 import ru.dvedev.me.yaphotoframe.library.LibraryStore
+import ru.dvedev.me.yaphotoframe.media.MediaItem
 import ru.dvedev.me.yaphotoframe.media.MediaKind
 import ru.dvedev.me.yaphotoframe.media.PreviewSize
 import ru.dvedev.me.yaphotoframe.media.yandex.YandexPublicDiskSource
@@ -486,6 +487,67 @@ class FrameEngineTest {
     }
 
     @Test
+    fun `мелкий снимок после измерения выбывает из показа, а после снятия порога возвращается`() = runTest {
+        switchToCacheFolder()
+        var minimum = 480
+        val engine = library(
+            pageLimit = 50,
+            minLongSide = { minimum },
+            // Хранилище размеров не отдаёт: узнать их можно только по скачанной копии.
+            measure = { item, _ -> if (item.name == "кадр3.jpg") 300 else 1280 },
+        )
+        engine.sync()
+        repeat(6) {
+            engine.prefetch()
+            engine.advance()
+        }
+
+        val tiny = engine.entries.single { it.item.name == "кадр3.jpg" }
+        assertEquals("копия измерена", 300, tiny.previewLongSidePx)
+        assertEquals("и посчитана мелкой", 1, engine.indexState().tooSmall)
+        val shown = (1..30).map { checkNotNull(engine.advance()).name }
+        assertTrue("мелкий больше не показывается", shown.none { it == "кадр3.jpg" })
+
+        // Размер помнится и после перезапуска — мерить заново не придётся.
+        engine.flush()
+        val restarted = library(pageLimit = 50, minLongSide = { 480 })
+        assertEquals(300, restarted.entries.single { it.item.name == "кадр3.jpg" }.previewLongSidePx)
+
+        // Порог опустили — снимок возвращается без переобхода.
+        minimum = 0
+        val relaxed = (1..30).map { checkNotNull(engine.advance()).name }
+        assertTrue("после снятия порога снимок вернулся", relaxed.any { it == "кадр3.jpg" })
+    }
+
+    @Test
+    fun `впервые попавшее в рамку считается свежим, даже если залито давно`() = runTest {
+        switchToBulkFolder()
+        // Через год после заливки свежесть по дате заливки у всех истекла, и
+        // бонус свежести может взяться только из даты первого появления.
+        now += 365L * 24 * 60 * 60 * 1000
+        // Бонус задран, чтобы результат не зависел от удачи с зерном.
+        val engine = library(pageLimit = 50, tuning = PlaylistTuning(freshnessStrength = 30f))
+        engine.sync()
+        assertTrue(
+            "первый обход не делает свежим всё подряд",
+            engine.entries.all { it.firstSeenAtMillis == null },
+        )
+
+        // Владелец отметил ещё одну подпапку — в библиотеке появились пять снимков.
+        available["/Много"] = listOf("bulk-mnogo-plus.json")
+        engine.sync()
+        val appeared = engine.entries.filter { it.firstSeenAtMillis != null }
+        assertEquals("появившиеся помечены", 5, appeared.size)
+        assertTrue("временем появления", appeared.all { it.firstSeenAtMillis == now })
+
+        // Никого ещё не показывали, так что без бонуса пятеро новых
+        // шли бы наравне с двадцатью старыми.
+        val picks = (1..8).map { checkNotNull(engine.advance()).path }
+        val fresh = picks.count { path -> appeared.any { it.item.path == path } }
+        assertEquals("все новые вышли в первой восьмёрке: $picks", 5, fresh)
+    }
+
+    @Test
     fun `добавленное не ждёт, пока исчерпается очередь`() = runTest {
         switchToBulkFolder()
         val engine = library(pageLimit = 50)
@@ -583,6 +645,9 @@ class FrameEngineTest {
         pageLimit: Int = PAGE_LIMIT,
         seed: Int = 1,
         includeVideo: Boolean = false,
+        minLongSide: () -> Int = { 0 },
+        measure: (MediaItem, File) -> Int? = { _, _ -> null },
+        tuning: PlaylistTuning = PlaylistTuning(),
     ) = FrameEngine(
         source = YandexPublicDiskSource(
             publicKey = "https://disk.yandex.ru/d/TEST",
@@ -598,6 +663,9 @@ class FrameEngineTest {
         clock = { now },
         random = Random(seed),
         includeVideo = { includeVideo },
+        minPhotoLongSide = minLongSide,
+        measure = measure,
+        tuning = { tuning },
     )
 
     private fun cache() = MediaCache(cacheDirectory, { policy.budgetBytes }, { now })

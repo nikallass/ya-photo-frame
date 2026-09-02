@@ -72,6 +72,7 @@ class SettingsStore(context: Context) {
             placementStrength = prefs.getFloat(KEY_PLACEMENT, defaults.placementStrength),
             backgroundDim = prefs.getFloat(KEY_DIM, defaults.backgroundDim),
             blurSampleLongSide = prefs.getInt(KEY_BLUR, defaults.blurSampleLongSide),
+            minPhotoFraction = prefs.getFloat(KEY_MIN_PHOTO, defaults.minPhotoFraction),
             tunerEnabled = prefs.getBoolean(KEY_TUNER, defaults.tunerEnabled),
             cacheBudgetBytes = prefs.getLong(KEY_CACHE_BUDGET, defaults.cacheBudgetBytes),
             cacheItemThresholdBytes =
@@ -114,6 +115,7 @@ class SettingsStore(context: Context) {
             .putFloat(KEY_PLACEMENT, value.placementStrength)
             .putFloat(KEY_DIM, value.backgroundDim)
             .putInt(KEY_BLUR, value.blurSampleLongSide)
+            .putFloat(KEY_MIN_PHOTO, value.minPhotoFraction)
             .putBoolean(KEY_TUNER, value.tunerEnabled)
             .putLong(KEY_CACHE_BUDGET, value.cacheBudgetBytes)
             .putLong(KEY_CACHE_THRESHOLD, value.cacheItemThresholdBytes)
@@ -153,6 +155,7 @@ class SettingsStore(context: Context) {
         const val KEY_VIDEO_SOUND = "video_sound_enabled"
         const val KEY_PAIRS = "pair_portraits"
         const val KEY_FRESHNESS = "freshness_window_days"
+        const val KEY_MIN_PHOTO = "min_photo_fraction"
         const val KEY_CLOCK = "show_clock"
         const val KEY_DATE = "show_date"
     }
@@ -187,6 +190,9 @@ fun FrameSettings.sanitized(): FrameSettings {
         placementStrength = placementStrength.coerceIn(0f, 1f),
         backgroundDim = backgroundDim.coerceIn(0f, 1f),
         blurSampleLongSide = blurSampleLongSide.coerceIn(2, 64),
+        // Выше двух третей отсеклись бы и полноразмерные снимки: копия с Диска
+        // не больше 1280 px.
+        minPhotoFraction = minPhotoFraction.coerceIn(0f, 0.6f),
         tunerEnabled = tunerEnabled,
         cacheBudgetBytes = budget,
         cacheItemThresholdBytes = cacheItemThresholdBytes.coerceIn(MIN_ITEM_THRESHOLD_BYTES, budget),

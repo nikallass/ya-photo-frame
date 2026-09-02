@@ -260,7 +260,11 @@ const FIELDS = [
   { key: 'blurSampleLongSide', name: 'Размытие фона', note: 'меньше пикселей — сильнее размыто',
     min: 2, max: 64, step: 1, get: v => v, set: s => s, show: v => v + ' пикс.' },
 
-  { key: 'freshnessWindowDays', name: 'Считать свежим', note: 'сколько дней после заливки снимок выпадает чаще',
+  { key: 'minPhotoFraction', name: 'Не мельче', note: 'снимки уже этой доли экрана пропускаются — превью, кропы; 0 — показывать всё',
+    min: 0, max: 60, step: 5, get: v => Math.round(v * 100), set: s => s / 100,
+    show: v => v ? Math.round(v * 100) + ' % экрана' : 'показывать всё' },
+
+  { key: 'freshnessWindowDays', name: 'Считать свежим', note: 'сколько дней после заливки или первого появления в рамке снимок выпадает чаще',
     min: 1, max: 730, step: 1, get: v => v, set: s => s,
     show: v => v < 60 ? v + ' дн.' : (v/30).toFixed(0) + ' мес.' },
 
@@ -585,7 +589,7 @@ async function loadState() {
     const i = d.index, c = d.cache;
     document.getElementById('index').innerHTML =
       kv('всего файлов', i.total) + kv('фотографий', i.photos) + kv('видео', i.videos) +
-      kv('нечем показать', i.unshowable) + kv('показано хоть раз', i.shown) +
+      kv('нечем показать', i.unshowable) + kv('мельче порога', i.tooSmall) + kv('показано хоть раз', i.shown) +
       kv('последний обход', i.syncedAt ? new Date(i.syncedAt).toLocaleString('ru-RU') : 'не было');
     document.getElementById('cache').innerHTML =
       kv('занято', bytes(c.usedBytes)) + kv('из', bytes(c.budgetBytes)) + kv('файлов', c.files);

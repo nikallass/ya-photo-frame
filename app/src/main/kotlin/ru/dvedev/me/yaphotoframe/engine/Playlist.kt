@@ -14,7 +14,9 @@ import kotlin.random.Random
  *
  * Свежесть считается по дате появления файла в хранилище, а не по дате съёмки:
  * в папку кладут снимки двадцатилетней давности, и «недавно добавленное» — это
- * про добавление.
+ * про добавление. Второй источник свежести — дата, когда снимок впервые попал
+ * в библиотеку рамки: отметили подпапку, залитую год назад, — для рамки её
+ * содержимое новое.
  *
  * Выбор случайный, но при заданном зерне и часах — воспроизводимый, иначе
  * порядок показа было бы нечем проверить.
@@ -90,7 +92,8 @@ class Playlist(
 
     /** Недавно добавленное показывается охотнее, и бонус сходит на нет со временем. */
     private fun freshnessMultiplier(entry: LibraryEntry, nowMillis: Long): Float {
-        val addedAt = entry.item.addedAtMillis ?: return 1f
+        val addedAt = listOfNotNull(entry.item.addedAtMillis, entry.firstSeenAtMillis)
+            .maxOrNull() ?: return 1f
         val age = nowMillis - addedAt
         if (age < 0 || age >= tuning().freshnessWindowMillis) return 1f
 

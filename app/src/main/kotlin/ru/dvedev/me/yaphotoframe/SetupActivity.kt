@@ -205,6 +205,9 @@ class SetupActivity : Activity() {
             step = { s, d -> s.copy(videoMaxDurationMillis = (s.videoMaxDurationMillis + d * 30_000L).coerceAtLeast(0L)) })
         rows += Row("Звук в роликах", "по умолчанию нет", { yesNo(it.videoSoundEnabled) },
             step = { s, _ -> s.copy(videoSoundEnabled = !s.videoSoundEnabled) })
+        rows += Row("Не мельче", "доля экрана; 0 — показывать всё",
+            { if (it.minPhotoFraction <= 0f) "всё" else "${(it.minPhotoFraction * 100).toInt()} %" },
+            step = { s, d -> s.copy(minPhotoFraction = (s.minPhotoFraction + d * 0.05f).coerceIn(0f, 0.6f)) })
         rows += Row("Пары вертикальных", "два снимка рядом", { yesNo(it.pairPortraits) },
             step = { s, _ -> s.copy(pairPortraits = !s.pairPortraits) })
         rows += Row("Часы", "поверх кадра", { yesNo(it.showClock) },

@@ -66,11 +66,22 @@ class MediaLibrary(
     suspend fun sync(): SyncOutcome {
         val fresh = source.list()
         val remembered = snapshot.entries.associateBy { it.item.path }
+        // Первый обход не делает свежим всё подряд: тогда бонусу не на что
+        // действовать. А вот появившееся в уже живой библиотеке — из
+        // добавленной на Диск или только что отмеченной папки — свежее.
+        val firstSync = remembered.isEmpty()
+        val now = clock()
 
         val entries = fresh.map { item ->
+            val known = remembered[item.path]
             LibraryEntry(
                 item = item,
-                lastShownAtMillis = remembered[item.path]?.lastShownAtMillis,
+                lastShownAtMillis = known?.lastShownAtMillis,
+                // Известному его отметка остаётся какой была, пусть и пустой:
+                // иначе каждый обход «впервые видел» бы всю библиотеку.
+                firstSeenAtMillis =
+                    if (known != null) known.firstSeenAtMillis else now.takeUnless { firstSync },
+                previewLongSidePx = known?.previewLongSidePx,
             )
         }
 
@@ -78,7 +89,7 @@ class MediaLibrary(
         val removed = remembered.keys.count { it !in known }
         val added = entries.count { it.item.path !in remembered }
 
-        snapshot = LibrarySnapshot(syncedAtMillis = clock(), entries = entries)
+        snapshot = LibrarySnapshot(syncedAtMillis = now, entries = entries)
         // Обход и так идёт в фоновом потоке, и его результат терять нельзя —
         // пишем сразу.
         store.save(snapshot)
@@ -100,6 +111,17 @@ class MediaLibrary(
 
         val updated = snapshot.entries.toMutableList()
         updated[index] = updated[index].copy(lastShownAtMillis = clock())
+        snapshot = snapshot.copy(entries = updated)
+        scheduleSave()
+    }
+
+    /** Запоминает измеренный размер уменьшенной копии. */
+    fun recordPreviewSize(path: String, longSidePx: Int) {
+        val index = snapshot.entries.indexOfFirst { it.item.path == path }
+        if (index < 0) return
+
+        val updated = snapshot.entries.toMutableList()
+        updated[index] = updated[index].copy(previewLongSidePx = longSidePx)
         snapshot = snapshot.copy(entries = updated)
         scheduleSave()
     }

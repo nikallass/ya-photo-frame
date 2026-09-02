@@ -55,6 +55,20 @@ class FrameEngine(
      * переобхода хранилища.
      */
     private val includeVideo: () -> Boolean = { false },
+    /**
+     * Мельче скольких пикселей по длинной стороне снимок не показывать.
+     *
+     * Превью, кропы и картинки из мессенджеров на большом экране выглядят
+     * почтовой маркой. Ноль — показывать всё.
+     */
+    private val minPhotoLongSide: () -> Int = { 0 },
+    /**
+     * Длинная сторона скачанной копии в пикселях, или null, если не разобрать.
+     *
+     * Хранилище размеров не отдаёт, так что измерять можно только скачанное.
+     * Снаружи, потому что движок про картинки ничего не знает.
+     */
+    private val measure: (MediaItem, File) -> Int? = { _, _ -> null },
 ) {
 
     private val library = MediaLibrary(source, store, clock)
@@ -71,8 +85,17 @@ class FrameEngine(
     fun showablePhotos(): List<LibraryEntry> = library.showablePhotos()
 
     /** Что движок готов поставить в очередь. */
-    private fun candidates(): List<LibraryEntry> =
-        if (includeVideo()) library.showable() else library.showablePhotos()
+    private fun candidates(): List<LibraryEntry> {
+        val all = if (includeVideo()) library.showable() else library.showablePhotos()
+        val minimum = minPhotoLongSide()
+        return if (minimum <= 0) all else all.filter { !it.isSmallerThan(minimum) }
+    }
+
+    private fun entryOf(path: String): LibraryEntry? =
+        library.entries.firstOrNull { it.item.path == path }
+
+    private fun isTooSmall(path: String): Boolean =
+        entryOf(path)?.isSmallerThan(minPhotoLongSide()) == true
 
     /** Обходит хранилище, обновляет индекс и приводит очередь в соответствие. */
     suspend fun sync(): SyncOutcome {
@@ -193,6 +216,7 @@ class FrameEngine(
             shown = entries.count { it.lastShownAtMillis != null },
             syncedAtMillis = library.syncedAtMillis,
             failed = failures.size,
+            tooSmall = minPhotoLongSide().let { minimum -> entries.count { it.isSmallerThan(minimum) } },
         )
     }
 
@@ -235,6 +259,9 @@ class FrameEngine(
                     PlannedDelivery.Cached -> {
                         ensureCached(item)
                         fetched++
+                        // Размер стал известен только сейчас: мелочь из
+                        // очереди вон, пока не дошла до экрана.
+                        if (isTooSmall(item.path)) queue.remove(item.path)
                     }
 
                     PlannedDelivery.Stream -> streamed++
@@ -279,7 +306,11 @@ class FrameEngine(
         if (item.kind == MediaKind.PHOTO) {
             // Фон берётся из микро-копии, поэтому нужны обе.
             previewFile(item, PreviewSize.MICRO)
-            previewFile(item, PreviewSize.FULL)
+            val full = previewFile(item, PreviewSize.FULL)
+            if (entryOf(item.path)?.previewLongSidePx == null) {
+                measure(item, full)?.let { library.recordPreviewSize(item.path, it) }
+            }
+            full
         } else {
             fetcher.ensure(CacheKey.forOriginal(item), source.downloadUrl(item))
         }
@@ -303,7 +334,8 @@ class FrameEngine(
     fun advance(): MediaItem? {
         refill()
         val path = queue.removeFirstOrNull() ?: return null
-        val entry = library.entries.firstOrNull { it.item.path == path } ?: return advance()
+        val entry = entryOf(path) ?: return advance()
+        if (entry.isSmallerThan(minPhotoLongSide())) return advance()
         library.markShown(path)
         refill()
         return entry.item
@@ -339,6 +371,8 @@ data class IndexState(
     val shown: Int,
     val syncedAtMillis: Long,
     val failed: Int,
+    /** Сколько снимков измерено и оказалось мельче порога. */
+    val tooSmall: Int = 0,
 )
 
 /** Занятость кэша. */

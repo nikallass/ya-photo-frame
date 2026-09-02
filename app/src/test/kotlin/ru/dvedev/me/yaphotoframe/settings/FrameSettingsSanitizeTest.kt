@@ -42,6 +42,7 @@ class FrameSettingsSanitizeTest {
             driftAmplitude = 99f,
             frameInset = -5f,
             blurSampleLongSide = 0,
+            minPhotoFraction = 1f,
             prefetchCount = 10_000,
         ).sanitized()
 
@@ -49,6 +50,7 @@ class FrameSettingsSanitizeTest {
         assertEquals(0.30f, sanitized.driftAmplitude, 1e-6f)
         assertEquals(0.3f, sanitized.frameInset, 1e-6f)
         assertEquals(2, sanitized.blurSampleLongSide)
+        assertEquals(0.6f, sanitized.minPhotoFraction, 1e-6f)
         assertEquals(50, sanitized.prefetchCount)
     }
 }
