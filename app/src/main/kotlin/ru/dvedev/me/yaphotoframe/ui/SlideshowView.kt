@@ -2,6 +2,8 @@ package ru.dvedev.me.yaphotoframe.ui
 
 import android.content.Context
 import android.graphics.Color
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.FrameLayout
@@ -95,36 +97,73 @@ class SlideshowView(context: Context) : FrameLayout(context) {
         overlay.apply(settings)
 
         val duration = if (animate) settings.crossfadeMillis else 0L
-        // Слой с несколькими детьми при смене прозрачности Android рисует в
-        // отдельный буфер на каждом кадре; `withLayer` рисует его один раз и
-        // дальше только накладывает. Без этого растворение на телевизоре
-        // дёргалось.
-        incoming.animate().cancel()
-        incoming.alpha = 0f
-        incoming.animate()
-            .alpha(1f)
-            .setDuration(duration)
-            .setInterpolator(AccelerateDecelerateInterpolator())
-            .withLayer()
-            .withEndAction {
-                if (outgoing !== incoming) release(outgoing)
-                // Ход стартует после растворения: пока слой в буфере, каждый
-                // сдвиг перерисовывал бы буфер целиком. За полторы секунды кадр
-                // всё равно сдвинулся бы на пиксель.
-                if (incoming is FrameLayer) {
-                    incoming.startDrift(settings.showDurationMillis)
-                }
-            }
-            .start()
-
         // Уходящий слой не гасим: он непрозрачный и лежит под приходящим, а
         // смесь «верх·α + низ·(1−α)» получается одна и та же, гаснет низ или
-        // нет. Зато экран смешивает один слой, а не два, — на телевизоре это
-        // разница между дёрганым растворением и ровным.
-        outgoing?.animate()?.cancel()
-        // Ход уходящего слоя останавливаем: он под приходящим и его сдвиг
-        // всё равно не виден, а перерисовку вызывает.
+        // нет. Зато экран смешивает один слой, а не два. Ход его тоже
+        // останавливаем: сдвиг под приходящим не виден, а перерисовку вызывает.
         if (outgoing !== incoming && outgoing is FrameLayer) outgoing.stopDrift()
+        startFade(incoming, duration) {
+            if (outgoing !== incoming) release(outgoing)
+            // Ход стартует после растворения: пока слой в буфере, каждый
+            // сдвиг перерисовывал бы буфер целиком. За полторы секунды кадр
+            // всё равно сдвинулся бы на пиксель.
+            if (incoming is FrameLayer) incoming.startDrift(settings.showDurationMillis)
+        }
+    }
+
+    private var fade: Runnable? = null
+    private val fadeHandler = Handler(Looper.getMainLooper())
+    private val fadeCurve = AccelerateDecelerateInterpolator()
+
+    /**
+     * Проявляет слой сам, тридцать шагов в секунду.
+     *
+     * Системный аниматор просит кадр на каждый vsync, а телевизор смешивает
+     * два полноэкранных слоя дольше шестнадцати миллисекунд — половина
+     * кадров опаздывала, и растворение шло рывками. При тридцати шагах в
+     * секунду у каждого кадра вдвое больше времени, и он успевает всегда:
+     * ровные тридцать выглядят лучше дёрганых шестидесяти.
+     *
+     * Слой на время растворения кладётся в аппаратный буфер: без этого
+     * контейнер с несколькими детьми при смене прозрачности рисовался бы в
+     * отдельный буфер на каждом шаге.
+     */
+    private fun startFade(view: View, durationMillis: Long, onEnd: () -> Unit) {
+        cancelFade()
+        view.animate().cancel()
+        if (durationMillis <= 0L) {
+            view.alpha = 1f
+            onEnd()
+            return
+        }
+        // Едва видимый, а не нулевой: слой с нулевой прозрачностью не рисуется,
+        // и буфер под него не строится — тогда первый шаг растворения строил
+        // бы его сам и опаздывал.
+        view.alpha = 1f / 255
+        view.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        val startedAt = System.currentTimeMillis() + FADE_WARMUP_MILLIS
+        val tick = object : Runnable {
+            override fun run() {
+                val progress = ((System.currentTimeMillis() - startedAt).toFloat() / durationMillis)
+                    .coerceIn(0f, 1f)
+                view.alpha = maxOf(fadeCurve.getInterpolation(progress), 1f / 255)
+                if (progress < 1f) {
+                    fadeHandler.postDelayed(this, FADE_TICK_MILLIS)
+                } else {
+                    fade = null
+                    view.setLayerType(View.LAYER_TYPE_NONE, null)
+                    onEnd()
+                }
+            }
+        }
+        fade = tick
+        // Первый шаг — после того, как буфер построен на кадре без движения.
+        fadeHandler.postDelayed(tick, FADE_WARMUP_MILLIS)
+    }
+
+    private fun cancelFade() {
+        fade?.let { fadeHandler.removeCallbacks(it) }
+        fade = null
     }
 
     /** Раздаёт новые настройки слоям: видимый обновится прямо сейчас. */
@@ -138,6 +177,7 @@ class SlideshowView(context: Context) : FrameLayout(context) {
     }
 
     fun clear() {
+        cancelFade()
         photoLayers.forEach {
             it.animate().cancel()
             it.alpha = 0f
@@ -151,6 +191,14 @@ class SlideshowView(context: Context) : FrameLayout(context) {
     }
 
     /** Убрал слой ролика с экрана — теперь можно отпускать плеер. */
+    private companion object {
+        /** Тридцать шагов в секунду. */
+        const val FADE_TICK_MILLIS = 33L
+
+        /** Пара кадров на постройку буфера слоя, прежде чем он начнёт проявляться. */
+        const val FADE_WARMUP_MILLIS = 40L
+    }
+
     private fun release(view: View?) {
         when (view) {
             is FrameLayer -> view.clear()
