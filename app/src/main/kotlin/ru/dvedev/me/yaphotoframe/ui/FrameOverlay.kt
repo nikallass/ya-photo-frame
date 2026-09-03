@@ -49,18 +49,37 @@ class FrameOverlay(context: Context) : FrameLayout(context) {
         pauseView.visibility = if (paused) VISIBLE else GONE
     }
 
-    private val soundView = TextView(context).apply {
-        text = "♪"
-        textSize = 24f
-        setTextColor(Color.WHITE)
-        alpha = 0.6f
-        setShadowLayer(10f, 0f, 2f, Color.BLACK)
+    private val soundView = SpeakerIcon(context).apply {
+        alpha = 0.8f
         visibility = GONE
     }
 
-    /** Нотка в нижнем углу, пока ролик идёт со звуком: звук включают с пульта вслепую. */
+    /** Ролик идёт со звуком — динамик горит всё это время; снимок — гаснет сразу. */
+    private var soundOn = false
+
+    private val endFlash = Runnable { showSound() }
+
     fun setSound(on: Boolean) {
-        soundView.visibility = if (on) VISIBLE else GONE
+        soundOn = on
+        handler.removeCallbacks(endFlash)
+        showSound()
+    }
+
+    /**
+     * Звук переключили с пульта: на три секунды динамик, включённый или
+     * перечёркнутый, — иначе нажатие вслепую ничем не подтверждается. Потом
+     * значок возвращается к тому, что ролик и звук диктуют сами.
+     */
+    fun flashSound(enabled: Boolean) {
+        handler.removeCallbacks(endFlash)
+        soundView.muted = !enabled
+        soundView.visibility = VISIBLE
+        handler.postDelayed(endFlash, SOUND_FLASH_MILLIS)
+    }
+
+    private fun showSound() {
+        soundView.muted = false
+        soundView.visibility = if (soundOn) VISIBLE else GONE
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -92,13 +111,14 @@ class FrameOverlay(context: Context) : FrameLayout(context) {
                 Gravity.BOTTOM or Gravity.START,
             ).apply { leftMargin = MARGIN; bottomMargin = MARGIN },
         )
+        // Рядом с паузой, в том же углу: правее неё, чтобы не наезжать.
         addView(
             soundView,
             LayoutParams(
                 LayoutParams.WRAP_CONTENT,
                 LayoutParams.WRAP_CONTENT,
-                Gravity.BOTTOM or Gravity.END,
-            ).apply { rightMargin = MARGIN; bottomMargin = MARGIN },
+                Gravity.BOTTOM or Gravity.START,
+            ).apply { leftMargin = MARGIN + SOUND_OFFSET; bottomMargin = MARGIN - 12 },
         )
         layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
     }
@@ -198,6 +218,8 @@ class FrameOverlay(context: Context) : FrameLayout(context) {
     private companion object {
         const val CLOCK_ALPHA = 0.85f
         const val MARGIN = 56
+        const val SOUND_OFFSET = 64
+        const val SOUND_FLASH_MILLIS = 3_000L
         const val TICK_MILLIS = 30_000L
         const val FADE_MILLIS = 1_500L
 

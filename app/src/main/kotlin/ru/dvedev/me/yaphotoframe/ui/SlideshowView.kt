@@ -174,6 +174,8 @@ class SlideshowView(context: Context) : FrameLayout(context) {
 
     fun setSound(on: Boolean) = overlay.setSound(on)
 
+    fun flashSound(enabled: Boolean) = overlay.flashSound(enabled)
+
     /** Пауза: ход замирает, значок в углу; часы идут своим чередом. */
     fun setPaused(paused: Boolean) {
         this.paused = paused

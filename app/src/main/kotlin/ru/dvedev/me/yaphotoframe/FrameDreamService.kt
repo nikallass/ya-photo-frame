@@ -520,15 +520,18 @@ class FrameDreamService : DreamService() {
      * потому что за спиной уже лежал заготовленный кадр вперёд.
      */
     private fun remember(item: ru.dvedev.me.yaphotoframe.media.MediaItem) {
-        // Показ из истории — назад или вперёд по ней — историю не меняет.
-        if (historyCursor in history.indices && history[historyCursor].path == item.path) return
-        if (history.lastOrNull()?.path == item.path) {
+        // Историю читает и страница со своего потока — под замком.
+        synchronized(history) {
+            // Показ из истории — назад или вперёд по ней — историю не меняет.
+            if (historyCursor in history.indices && history[historyCursor].path == item.path) return
+            if (history.lastOrNull()?.path == item.path) {
+                historyCursor = history.lastIndex
+                return
+            }
+            history.add(item)
+            while (history.size > HISTORY_DEPTH) history.removeAt(0)
             historyCursor = history.lastIndex
-            return
         }
-        history.add(item)
-        while (history.size > HISTORY_DEPTH) history.removeAt(0)
-        historyCursor = history.lastIndex
     }
 
     /** Предыдущий показанный кадр; null — возвращаться некуда. */
@@ -635,6 +638,7 @@ class FrameDreamService : DreamService() {
         store.update { it.copy(videoSoundEnabled = enabled) }
         playback.setSoundEnabled(enabled)
         overlay(showingSound = enabled)
+        slideshowView?.flashSound(enabled)
         Diary.note(if (enabled) "звук в роликах включён с пульта" else "звук в роликах выключен с пульта")
     }
 
@@ -863,8 +867,12 @@ class FrameDreamService : DreamService() {
             )
             append("},")
             append("\"queue\":").append(
-                jsonArray(engine?.let { kotlinx.coroutines.runBlocking { it.upcoming() } }?.map { it.name }.orEmpty()),
+                jsonItems(engine?.let { kotlinx.coroutines.runBlocking { it.upcoming() } }.orEmpty()),
             )
+            append(',')
+            // Что уже показано — с путями: понравившийся снимок ищут потом на
+            // Диске, а с экрана имя файла не прочесть.
+            append("\"recent\":").append(jsonItems(synchronized(history) { history.reversed() }))
             append(',')
             append("\"hourly\":").append(stats.byHour().joinToString(",", "[", "]"))
             append(',')
@@ -879,6 +887,11 @@ class FrameDreamService : DreamService() {
             append('}')
         }
     }
+
+    private fun jsonItems(items: List<ru.dvedev.me.yaphotoframe.media.MediaItem>): String =
+        items.joinToString(",", "[", "]") {
+            "{\"name\":\"" + escape(it.name) + "\",\"path\":\"" + escape(it.path) + "\"}"
+        }
 
     private fun jsonArray(values: List<String>): String =
         values.joinToString(",", "[", "]") { "\"" + escape(it) + "\"" }

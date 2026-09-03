@@ -99,6 +99,7 @@
           max-height: 260px; overflow: auto; }
   .list div { padding: 1px 0; }
   .list .bad { color: var(--bad); }
+  .list a { color: var(--fg); text-decoration: none; border-bottom: 1px dotted var(--muted); }
   .empty { color: var(--muted); font-size: 13px; }
   .tree { font-size: 15px; }
   .treebar { display: flex; gap: 8px; margin-bottom: 10px; }
@@ -188,12 +189,18 @@
     <div class="hlabels"><span>0</span><span>6</span><span>12</span><span>18</span><span>23</span></div>
   </div>
   <div class="row">
+    <div class="name">Показано недавно</div>
+    <div class="note">последние кадры, новые сверху; ссылка ведёт на файл на Диске</div>
+    <div class="list" id="recent"></div>
+  </div>
+  <div class="row">
     <div class="name">Очередь</div>
     <div class="note">что покажется дальше</div>
     <div class="list" id="queue"></div>
   </div>
   <div class="row">
-    <div class="name">Не удалось подготовить</div>
+    <div class="name">Не удалось загрузить</div>
+    <div class="note">файлы, которые Диск не отдал или сеть не донесла; рамка попробует их снова позже</div>
     <div class="list" id="failures"></div>
   </div>
   <div class="row">
@@ -804,6 +811,14 @@ const list = (items, bad) => items.length
   ? items.map(x => '<div' + (bad ? ' class="bad"' : '') + '>' + escapeHtml(x) + '</div>').join('')
   : '<div class="empty">пусто</div>';
 const escapeHtml = s => s.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+// Файл внутри общедоступной папки открывается по адресу папки плюс путь.
+const diskLink = path => (state.folderUrl || '').replace(/\/+$/, '') +
+  path.split('/').map(encodeURIComponent).join('/');
+const linked = items => items.length
+  ? items.map(x => typeof x === 'string' ? '<div>' + escapeHtml(x) + '</div>'
+    : '<div><a href="' + diskLink(x.path).replace(/"/g, '&quot;') + '" target="_blank" rel="noopener">' +
+      escapeHtml(x.name) + '</a></div>').join('')
+  : '<div class="empty">пусто</div>';
 
 async function loadState() {
   try {
@@ -829,7 +844,8 @@ async function loadState() {
       .map(v => '<i class="' + (v ? '' : 'zero') + '" style="height:' +
         Math.max(2, v / peak * 100) + '%" title="' + v + '"></i>').join('');
 
-    document.getElementById('queue').innerHTML = list(d.queue);
+    document.getElementById('queue').innerHTML = linked(d.queue || []);
+    document.getElementById('recent').innerHTML = linked(d.recent || []);
     document.getElementById('failures').innerHTML = list(d.failures || [], true);
     document.getElementById('log').innerHTML = list(d.log);
     status.textContent = 'показов всего: ' + d.shows + ' · обновлено ' +
