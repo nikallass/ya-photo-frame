@@ -79,6 +79,11 @@ class SettingsReceiver : BroadcastReceiver() {
                 raw.toLongOrNull()?.let { settings.copy(videoMaxSizeBytes = it) }
             "streamBufferBytes" ->
                 raw.toLongOrNull()?.let { settings.copy(streamBufferBytes = it) }
+            "streamMaxBitrateBps" ->
+                raw.toLongOrNull()?.let { settings.copy(streamMaxBitrateBps = it) }
+            "externalStorageUuid" -> settings.copy(externalStorageUuid = raw)
+            "externalReserveBytes" ->
+                raw.toLongOrNull()?.let { settings.copy(externalReserveBytes = it) }
             "pairPortraits" ->
                 raw.toBooleanStrictOrNull()?.let { settings.copy(pairPortraits = it) }
             "freshnessWindowDays" ->

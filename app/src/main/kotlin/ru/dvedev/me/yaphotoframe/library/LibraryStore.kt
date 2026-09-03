@@ -81,6 +81,7 @@ class LibraryStore(private val file: File) {
         @SerialName("last_shown_at") val lastShownAtMillis: Long? = null,
         @SerialName("first_seen_at") val firstSeenAtMillis: Long? = null,
         @SerialName("preview_long_side") val previewLongSidePx: Int? = null,
+        @SerialName("duration_ms") val durationMillis: Long? = null,
     )
 
     private fun StoredLibrary.toSnapshot() = LibrarySnapshot(
@@ -100,6 +101,7 @@ class LibraryStore(private val file: File) {
                 lastShownAtMillis = stored.lastShownAtMillis,
                 firstSeenAtMillis = stored.firstSeenAtMillis,
                 previewLongSidePx = stored.previewLongSidePx,
+                durationMillis = stored.durationMillis,
             )
         },
     )
@@ -119,6 +121,7 @@ class LibraryStore(private val file: File) {
                 lastShownAtMillis = entry.lastShownAtMillis,
                 firstSeenAtMillis = entry.firstSeenAtMillis,
                 previewLongSidePx = entry.previewLongSidePx,
+                durationMillis = entry.durationMillis,
             )
         },
     )

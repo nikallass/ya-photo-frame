@@ -87,6 +87,10 @@ class SettingsStore(context: Context) {
             videoSoundEnabled = prefs.getBoolean(KEY_VIDEO_SOUND, defaults.videoSoundEnabled),
             videoMaxSizeBytes = prefs.getLong(KEY_VIDEO_MAX_SIZE, defaults.videoMaxSizeBytes),
             streamBufferBytes = prefs.getLong(KEY_STREAM_BUFFER, defaults.streamBufferBytes),
+            streamMaxBitrateBps = prefs.getLong(KEY_STREAM_BITRATE, defaults.streamMaxBitrateBps),
+            externalStorageUuid = prefs.getString(KEY_EXTERNAL, defaults.externalStorageUuid)
+                ?: defaults.externalStorageUuid,
+            externalReserveBytes = prefs.getLong(KEY_EXTERNAL_RESERVE, defaults.externalReserveBytes),
             pairPortraits = prefs.getBoolean(KEY_PAIRS, defaults.pairPortraits),
             freshnessWindowDays = prefs.getInt(KEY_FRESHNESS, defaults.freshnessWindowDays),
             showClock = prefs.getBoolean(KEY_CLOCK, defaults.showClock),
@@ -132,6 +136,9 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_VIDEO_SOUND, value.videoSoundEnabled)
             .putLong(KEY_VIDEO_MAX_SIZE, value.videoMaxSizeBytes)
             .putLong(KEY_STREAM_BUFFER, value.streamBufferBytes)
+            .putLong(KEY_STREAM_BITRATE, value.streamMaxBitrateBps)
+            .putString(KEY_EXTERNAL, value.externalStorageUuid)
+            .putLong(KEY_EXTERNAL_RESERVE, value.externalReserveBytes)
             .putBoolean(KEY_PAIRS, value.pairPortraits)
             .putInt(KEY_FRESHNESS, value.freshnessWindowDays)
             .putBoolean(KEY_CLOCK, value.showClock)
@@ -167,6 +174,9 @@ class SettingsStore(context: Context) {
         const val KEY_VIDEO_SOUND = "video_sound_enabled"
         const val KEY_VIDEO_MAX_SIZE = "video_max_size_bytes"
         const val KEY_STREAM_BUFFER = "stream_buffer_bytes"
+        const val KEY_STREAM_BITRATE = "stream_max_bitrate_bps"
+        const val KEY_EXTERNAL = "external_storage_uuid"
+        const val KEY_EXTERNAL_RESERVE = "external_reserve_bytes"
         const val KEY_PAIRS = "pair_portraits"
         const val KEY_FRESHNESS = "freshness_window_days"
         const val KEY_MIN_PHOTO = "min_photo_fraction"
@@ -221,6 +231,9 @@ fun FrameSettings.sanitized(): FrameSettings {
         videoSoundEnabled = videoSoundEnabled,
         videoMaxSizeBytes = videoMaxSizeBytes.coerceIn(0L, 8L * 1024 * 1024 * 1024),
         streamBufferBytes = streamBufferBytes.coerceIn(0L, 4L * 1024 * 1024 * 1024),
+        streamMaxBitrateBps = streamMaxBitrateBps.coerceIn(0L, 2_000_000_000L),
+        externalStorageUuid = externalStorageUuid.trim(),
+        externalReserveBytes = externalReserveBytes.coerceIn(0L, 1024L * 1024 * 1024 * 1024),
         pairPortraits = pairPortraits,
         freshnessWindowDays = freshnessWindowDays.coerceIn(1, 3650),
         showClock = showClock,

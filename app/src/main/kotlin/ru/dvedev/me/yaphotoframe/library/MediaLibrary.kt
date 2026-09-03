@@ -151,6 +151,38 @@ class MediaLibrary(
         scheduleSave()
     }
 
+    private var byPath: Map<String, LibraryEntry> = emptyMap()
+    private var byPathOf: LibrarySnapshot? = null
+
+    /**
+     * Элемент по пути.
+     *
+     * Карта строится лениво и живёт, пока не сменился снимок: перебор списка
+     * на каждый запрос при тысячах элементов и сотнях запросов на набор
+     * очереди — миллионы сравнений, и это на телевизоре.
+     */
+    @Synchronized
+    fun entryOf(path: String): LibraryEntry? {
+        val current = snapshot
+        if (byPathOf !== current) {
+            byPath = current.entries.associateBy { it.item.path }
+            byPathOf = current
+        }
+        return byPath[path]
+    }
+
+    /** Запоминает длительность ролика; 0 — заголовок не разобрался. */
+    @Synchronized
+    fun recordDuration(path: String, millis: Long) {
+        val index = snapshot.entries.indexOfFirst { it.item.path == path }
+        if (index < 0) return
+
+        val updated = snapshot.entries.toMutableList()
+        updated[index] = updated[index].copy(durationMillis = millis)
+        snapshot = snapshot.copy(entries = updated)
+        scheduleSave()
+    }
+
     /** Записывает накопленное немедленно — на случай остановки показа. */
     fun flush() {
         savePending.set(false)

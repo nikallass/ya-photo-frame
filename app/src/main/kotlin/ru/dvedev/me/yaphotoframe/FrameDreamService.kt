@@ -15,11 +15,14 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import android.os.SystemClock
+import ru.dvedev.me.yaphotoframe.cache.ArchiveStore
 import ru.dvedev.me.yaphotoframe.cache.MediaCache
 import ru.dvedev.me.yaphotoframe.cache.MediaFetcher
 import ru.dvedev.me.yaphotoframe.diag.Diary
 import ru.dvedev.me.yaphotoframe.diag.ShowStats
 import ru.dvedev.me.yaphotoframe.engine.FrameEngine
+import ru.dvedev.me.yaphotoframe.engine.ArchiveEvent
 import ru.dvedev.me.yaphotoframe.engine.PrimeEvent
 import ru.dvedev.me.yaphotoframe.engine.PlaylistTuning
 import ru.dvedev.me.yaphotoframe.engine.PrefetchOutcome
@@ -36,6 +39,8 @@ import ru.dvedev.me.yaphotoframe.slideshow.PreparedPhoto
 import ru.dvedev.me.yaphotoframe.slideshow.PreparedVideo
 import ru.dvedev.me.yaphotoframe.slideshow.Slideshow
 import ru.dvedev.me.yaphotoframe.tuner.TunerServer
+import ru.dvedev.me.yaphotoframe.storage.ExternalMedia
+import ru.dvedev.me.yaphotoframe.video.HttpDurationProber
 import ru.dvedev.me.yaphotoframe.video.StreamHead
 import ru.dvedev.me.yaphotoframe.video.ExoStreamPrimer
 import ru.dvedev.me.yaphotoframe.video.StreamCache
@@ -318,8 +323,104 @@ class FrameDreamService : DreamService() {
         File(filesDir, LIBRARY_FILE).delete()
         File(cacheDir, CACHE_DIRECTORY).deleteRecursively()
         StreamCache.clear(this)
+        // Ролики прежней папки на носителе тоже не нужны — дерево там её.
+        scope.launch(Dispatchers.IO) {
+            runCatching { externalStore()?.let { store -> store.keys().forEach(store::remove) } }
+        }
         slideshowView?.clear()
         startSlideshow()
+    }
+
+    private val media: ExternalMedia by lazy { ExternalMedia(this) }
+    private var externalCurrent: ArchiveStore? = null
+    private var externalVolume: ExternalMedia.Volume? = null
+    private var externalUuid: String? = null
+    private var externalCheckedAt = 0L
+    private var externalMissingNoted = false
+
+    /**
+     * Носитель под тяжёлые ролики, если он выбран и подключён.
+     *
+     * Движок спрашивает его на каждый ролик при наборе очереди, а перечисление
+     * томов — обращение к системе; поэтому ответ живёт несколько секунд.
+     * Флешку вынули — ответ станет null, и тяжёлые ролики пойдут мимо;
+     * вернули — тот же том, те же файлы, ничего качать заново не надо.
+     */
+    @Synchronized
+    private fun externalStore(): ArchiveStore? {
+        val wanted = store.current.externalStorageUuid
+        if (wanted.isBlank()) {
+            externalCurrent = null
+            externalVolume = null
+            externalUuid = null
+            return null
+        }
+        val now = SystemClock.elapsedRealtime()
+        if (externalUuid == wanted && now - externalCheckedAt < EXTERNAL_CHECK_MILLIS) return externalCurrent
+        externalCheckedAt = now
+        val volume = runCatching { media.volume(wanted) }.getOrNull()
+        if (volume == null) {
+            if (externalCurrent != null || !externalMissingNoted) {
+                Diary.note("носитель $wanted не подключён — ролики тяжелее канала пропускаются")
+                externalMissingNoted = true
+            }
+            externalCurrent = null
+            externalVolume = null
+            externalUuid = wanted
+            return null
+        }
+        externalVolume = volume
+        if (externalCurrent == null || externalUuid != wanted) {
+            volume.root.mkdirs()
+            val cache = MediaCache(
+                directory = volume.root,
+                budgetBytes = MediaCache.reserveBudget(volume.root, { store.current.externalReserveBytes }),
+            )
+            cache.sweepLeftovers()
+            externalCurrent = ArchiveStore(cache, MediaFetcher(Http.client, cache))
+            externalUuid = wanted
+            externalMissingNoted = false
+            Diary.note("носитель ${volume.label}: ${volume.root.path}")
+        }
+        return externalCurrent
+    }
+
+    /** Тома для страницы настройки: что можно выбрать носителем. */
+    private fun storageJson(): String {
+        val volumes = runCatching { media.volumes() }.getOrDefault(emptyList())
+        return "{\"chosen\":\"" + escape(store.current.externalStorageUuid) + "\",\"volumes\":" +
+            volumes.joinToString(",", "[", "]") {
+                "{\"uuid\":\"" + escape(it.uuid) + "\",\"label\":\"" + escape(it.label) +
+                    "\",\"path\":\"" + escape(it.root.path) + "\",\"totalBytes\":" + it.totalBytes +
+                    ",\"freeBytes\":" + it.freeBytes + "}"
+            } + "}"
+    }
+
+    private fun externalJson(): String {
+        val engine = engine
+        val current = externalStore()
+        val volume = externalVolume
+        val chosen = store.current.externalStorageUuid
+        return buildString {
+            append('{')
+            append("\"uuid\":\"").append(escape(chosen)).append("\",")
+            append("\"present\":").append(current != null).append(',')
+            append("\"label\":\"").append(escape(volume?.label ?: "")).append("\",")
+            append("\"path\":\"").append(escape(volume?.root?.path ?: "")).append("\",")
+            append("\"usedBytes\":").append(current?.usedBytes() ?: 0).append(',')
+            append("\"freeBytes\":").append(current?.freeBytes() ?: 0).append(',')
+            append("\"totalBytes\":").append(volume?.totalBytes ?: 0).append(',')
+            append("\"files\":").append(current?.files() ?: 0).append(',')
+            append("\"reserveBytes\":").append(store.current.externalReserveBytes).append(',')
+            append("\"waiting\":").append(engine?.waitingForStorage() ?: 0).append(',')
+            append("\"archiving\":").append(
+                engine?.archiveState()?.let {
+                    "{\"name\":\"${escape(it.item.name)}\",\"wantedBytes\":${it.wantedBytes}," +
+                        "\"doneBytes\":${it.doneBytes},\"startedAt\":${it.startedAtMillis}}"
+                } ?: "null",
+            )
+            append('}')
+        }
     }
 
     /** Порог мелкости в пикселях: доля из настроек от длинной стороны экрана. */
@@ -388,6 +489,11 @@ class FrameDreamService : DreamService() {
                 primer = ExoStreamPrimer(streamCache),
                 primeBudgetBytes = { store.current.streamBufferBytes },
                 onPrime = ::reportPrime,
+                prober = HttpDurationProber(Http.client),
+                channelBps = { store.current.streamMaxBitrateBps },
+                maxVideoDurationMillis = { store.current.videoMaxDurationMillis },
+                external = ::externalStore,
+                onArchive = ::reportArchive,
                 policy = { store.current.cachePolicy() },
                 includeVideo = { store.current.showVideo },
                 minPhotoLongSide = ::minPhotoLongSide,
@@ -851,6 +957,7 @@ class FrameDreamService : DreamService() {
                 assets = assets,
                 diagnostics = ::diagnostics,
                 folders = ::foldersJson,
+                storage = ::storageJson,
                 onRescanFolders = {
                     scope.launch {
                         rescanningFolders = true
@@ -943,6 +1050,7 @@ class FrameDreamService : DreamService() {
                 } ?: "null",
             )
             append("},")
+            append("\"external\":").append(externalJson()).append(',')
             append("\"queue\":").append(
                 jsonItems(engine?.let { kotlinx.coroutines.runBlocking { it.upcoming() } }.orEmpty()),
             )
@@ -967,7 +1075,9 @@ class FrameDreamService : DreamService() {
 
     private fun jsonItems(items: List<ru.dvedev.me.yaphotoframe.media.MediaItem>): String =
         items.joinToString(",", "[", "]") {
-            "{\"name\":\"" + escape(it.name) + "\",\"path\":\"" + escape(it.path) + "\"}"
+            val bitrate = engine?.bitrateOf(it.path)
+            "{\"name\":\"" + escape(it.name) + "\",\"path\":\"" + escape(it.path) + "\"" +
+                (if (bitrate != null) ",\"bitrate\":$bitrate" else "") + "}"
         }
 
     private fun jsonArray(values: List<String>): String =
@@ -1008,6 +1118,24 @@ class FrameDreamService : DreamService() {
         }
     }
 
+    /** Закачка на носитель — в дневник: по ней видно и канал, и почему ролик ждёт. */
+    private fun reportArchive(event: ArchiveEvent) {
+        when (event) {
+            is ArchiveEvent.Started ->
+                Diary.note("ролик ${event.item.name}: качаю на носитель ${event.item.sizeBytes / 1_048_576} МБ")
+            is ArchiveEvent.Finished -> {
+                val seconds = maxOf(1L, event.tookMillis / 1000)
+                val speed = event.item.sizeBytes / 1_048_576.0 / seconds
+                Diary.note(
+                    "ролик ${event.item.name} на носителе за ${formatSeconds(seconds)}, " +
+                        "${"%.1f".format(speed)} МБ/с",
+                )
+            }
+            is ArchiveEvent.Failed ->
+                Diary.problem("ролик ${event.item.name} не доехал до носителя: ${event.reason}")
+        }
+    }
+
     private fun formatSeconds(seconds: Long): String =
         if (seconds < 60) "$seconds с" else "${seconds / 60} мин ${seconds % 60} с"
 
@@ -1028,6 +1156,7 @@ class FrameDreamService : DreamService() {
         const val WATCHDOG_TICK_MILLIS = 20_000L
         const val CLOCK_SKEW_NOTE_MILLIS = 3_000L
         const val WATCHDOG_GRACE_MILLIS = 90_000L
+        const val EXTERNAL_CHECK_MILLIS = 3_000L
         const val HISTORY_DEPTH = 10
         const val SKIP_NOTE_INTERVAL_MILLIS = 60_000L
 

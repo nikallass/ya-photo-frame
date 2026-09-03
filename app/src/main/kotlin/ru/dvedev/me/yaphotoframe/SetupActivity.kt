@@ -58,6 +58,21 @@ class SetupActivity : Activity() {
      * Шаги заданы так же, как ползунки на странице в браузере, — чтобы
      * настройка с пульта и с телефона давали одно и то же.
      */
+    private val media by lazy { ru.dvedev.me.yaphotoframe.storage.ExternalMedia(this) }
+
+    private fun describeVolume(uuid: String): String {
+        if (uuid.isBlank()) return "нет"
+        val volume = runCatching { media.volume(uuid) }.getOrNull() ?: return "$uuid — не подключён"
+        return "${volume.label} ${volume.uuid}, свободно ${volume.freeBytes / 1_073_741_824} ГБ"
+    }
+
+    /** Перебор по кругу: «нет» и все подключённые флешки. */
+    private fun nextVolume(current: String, step: Int): String {
+        val options = listOf("") + runCatching { media.volumes() }.getOrDefault(emptyList()).map { it.uuid }
+        val index = options.indexOf(current).coerceAtLeast(0)
+        return options[Math.floorMod(index + step, options.size)]
+    }
+
     private class Row(
         val title: String,
         val hint: String,
@@ -310,6 +325,17 @@ class SetupActivity : Activity() {
         rows += Row("Подкачка потока", "тяжёлому ролику заранее; 0 — нет",
             { if (it.streamBufferBytes <= 0) "нет" else "${it.streamBufferBytes / 1_048_576} МБ" }) { s, d ->
             s.copy(streamBufferBytes = (s.streamBufferBytes + d * 128L * 1_048_576).coerceAtLeast(0L))
+        }
+        rows += Row("Канал", "выше — не потоком; 0 — всё потоком",
+            { if (it.streamMaxBitrateBps <= 0) "без ограничения" else "${it.streamMaxBitrateBps / 1_000_000} Мбит/с" }) { s, d ->
+            s.copy(streamMaxBitrateBps = (s.streamMaxBitrateBps + d * 5_000_000L).coerceAtLeast(0L))
+        }
+        rows += Row("Носитель", "флешка под тяжёлые ролики", { describeVolume(it.externalStorageUuid) }) { s, d ->
+            s.copy(externalStorageUuid = nextVolume(s.externalStorageUuid, d))
+        }
+        rows += Row("Запас на носителе", "столько не занимать",
+            { "%.1f ГБ".format(it.externalReserveBytes / 1_073_741_824.0) }) { s, d ->
+            s.copy(externalReserveBytes = (s.externalReserveBytes + d * 536_870_912L).coerceAtLeast(0L))
         }
         rows += Row("Звук в роликах", "по умолчанию нет", { yesNo(it.videoSoundEnabled) },
             step = { s, _ -> s.copy(videoSoundEnabled = !s.videoSoundEnabled) })

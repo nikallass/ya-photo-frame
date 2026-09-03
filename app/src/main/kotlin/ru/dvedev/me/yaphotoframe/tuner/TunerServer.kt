@@ -53,6 +53,8 @@ class TunerServer(
      * и подсказывать надо другое.
      */
     private val host: String = "dream",
+    /** Тома под носитель — страница показывает их списком. */
+    private val storage: () -> String = { "{\"volumes\":[]}" },
 ) {
 
     private var serverSocket: ServerSocket? = null
@@ -214,6 +216,9 @@ class TunerServer(
             method == "GET" && path == "/api/folders" ->
                 respond(client, "200 OK", "application/json; charset=utf-8", folders(query))
 
+            method == "GET" && path == "/api/storage" ->
+                respond(client, "200 OK", "application/json; charset=utf-8", storage())
+
             method == "GET" && path == "/api/state" ->
                 respond(client, "200 OK", "application/json; charset=utf-8", diagnostics())
 
@@ -326,6 +331,11 @@ class TunerServer(
                     ?: current.videoMaxSizeBytes,
                 streamBufferBytes = values["streamBufferBytes"]?.toLongOrNull()
                     ?: current.streamBufferBytes,
+                streamMaxBitrateBps = values["streamMaxBitrateBps"]?.toLongOrNull()
+                    ?: current.streamMaxBitrateBps,
+                externalStorageUuid = values["externalStorageUuid"] ?: current.externalStorageUuid,
+                externalReserveBytes = values["externalReserveBytes"]?.toLongOrNull()
+                    ?: current.externalReserveBytes,
                 pairPortraits = values["pairPortraits"]?.toBooleanStrictOrNull()
                     ?: current.pairPortraits,
                 freshnessWindowDays = values["freshnessWindowDays"]?.toIntOrNull()
@@ -375,6 +385,9 @@ class TunerServer(
         append("\"videoSoundEnabled\":").append(settings.videoSoundEnabled).append(',')
         append("\"videoMaxSizeBytes\":").append(settings.videoMaxSizeBytes).append(',')
         append("\"streamBufferBytes\":").append(settings.streamBufferBytes).append(',')
+        append("\"streamMaxBitrateBps\":").append(settings.streamMaxBitrateBps).append(',')
+        append("\"externalStorageUuid\":\"").append(settings.externalStorageUuid.replace("\"", "")).append("\",")
+        append("\"externalReserveBytes\":").append(settings.externalReserveBytes).append(',')
         append("\"pairPortraits\":").append(settings.pairPortraits).append(',')
         append("\"freshnessWindowDays\":").append(settings.freshnessWindowDays).append(',')
         append("\"minPhotoFraction\":").append(settings.minPhotoFraction).append(',')

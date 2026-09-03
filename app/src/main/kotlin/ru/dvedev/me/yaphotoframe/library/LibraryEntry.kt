@@ -24,7 +24,16 @@ data class LibraryEntry(
      * Хранилище размеров не отдаёт, поэтому известно только после скачивания.
      */
     val previewLongSidePx: Int? = null,
+    /**
+     * Длительность ролика по заголовку файла; null — ещё не мерили,
+     * 0 — мерили, но контейнер не разобрался (второй раз не лезем).
+     */
+    val durationMillis: Long? = null,
 ) {
+    /** Битрейт в битах в секунду, если длительность известна. */
+    val bitrateBps: Long?
+        get() = durationMillis?.takeIf { it > 0 }?.let { item.sizeBytes * 8_000 / it }
+
     /** Мельче ли снимок порога; неизмеренное мелким не считается. */
     fun isSmallerThan(minLongSidePx: Int): Boolean =
         minLongSidePx > 0 &&

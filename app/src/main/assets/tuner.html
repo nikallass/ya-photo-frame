@@ -100,6 +100,10 @@
   .list div { padding: 1px 0; }
   .list .bad { color: var(--bad); }
   .list a { color: var(--fg); text-decoration: none; border-bottom: 1px dotted var(--muted); }
+  .volume { display: flex; gap: 10px; align-items: center; padding: 9px 2px; cursor: pointer; }
+  .volume .box { width: 24px; flex: none; color: var(--muted); }
+  .volume.on .box { color: var(--accent); }
+  .volume small { color: var(--muted); display: block; }
   .empty { color: var(--muted); font-size: 13px; }
   .tree { font-size: 15px; }
   .treebar { display: flex; gap: 8px; margin-bottom: 10px; }
@@ -131,6 +135,14 @@
     <div class="note">публичная ссылка; смена папки сбрасывает индекс и кэш</div>
     <input type="text" id="folder" autocapitalize="off" autocorrect="off" spellcheck="false">
     <button id="savefolder">Задать папку</button>
+  </div>
+  <div class="row">
+    <div class="head"><span class="name">Носитель</span></div>
+    <div class="note">флешка под тяжёлые ролики: ролик тяжелее канала качается на неё один раз и идёт без
+      заиканий; без носителя такие ролики пропускаются. Вставьте флешку в телевизор и выберите её.
+      Файлы лежат в папке <b>Android/media/ru.dvedev.me.yaphotoframe/Фоторамка</b> — обычным деревом, как на Диске.
+      Если телевизор предложит «настроить как внутреннюю память», откажитесь: такую флешку не вынуть.</div>
+    <div class="list" id="volumes"><div class="empty">…</div></div>
   </div>
   <div id="toggles"></div>
   <div id="rows"></div>
@@ -184,6 +196,15 @@
     <div id="streamwrap" hidden>
       <div class="note" id="streamnote">буфер потока</div>
       <div class="bar"><i id="streambar"></i></div>
+    </div>
+  </div>
+  <div class="row">
+    <div class="name">Носитель</div>
+    <div id="external"></div>
+    <div class="bar"><i id="externalbar"></i></div>
+    <div id="archivewrap" hidden>
+      <div class="note" id="archivenote">закачка</div>
+      <div class="bar"><i id="archivebar"></i></div>
     </div>
   </div>
   <div class="row">
@@ -280,6 +301,14 @@ const FIELDS = [
   { key: 'streamBufferBytes', name: 'Подкачка потока', note: 'начало тяжёлого ролика подкачивается заранее в буфер этого объёма, и ролик выходит на экран, когда оно на месте; буфер общий и больше не растёт; 0 — не подкачивать',
     min: 0, max: 4096, step: 64, get: v => Math.round(v / 1048576), set: s => s * 1048576,
     show: v => !v ? 'нет' : v >= 1073741824 ? (v / 1073741824).toFixed(1) + ' ГБ' : Math.round(v / 1048576) + ' МБ' },
+
+  { key: 'streamMaxBitrateBps', name: 'Канал', note: 'сколько тянет сеть до Диска; ролик с битрейтом выше идёт не потоком, а с носителя, а без носителя пропускается; 0 — всё потоком',
+    min: 0, max: 200, step: 5, get: v => Math.round(v / 1000000), set: s => s * 1000000,
+    show: v => !v ? 'всё потоком' : Math.round(v / 1000000) + ' Мбит/с' },
+
+  { key: 'externalReserveBytes', name: 'Запас на носителе', note: 'сколько места на флешке не занимать; остальное — под ролики, давно не показанные вытесняются',
+    min: 0, max: 64, step: 1, get: v => Math.round(v / 536870912), set: s => s * 536870912,
+    show: v => (v / 1073741824).toFixed(1) + ' ГБ' },
 
   { key: 'videoMaxDurationMillis', name: 'Ролик не дольше', note: '0 — до конца, сколько бы ни длился',
     min: 0, max: 1800, step: 10,
@@ -453,7 +482,39 @@ function render(data) {
   if (document.activeElement !== folder) folder.value = state.folderUrl || '';
   for (const f of FIELDS) { inputs[f.key].value = f.get(state[f.key]); paint(f); }
   for (const t of TOGGLES) paintToggle(t);
+  paintVolumes();
 }
+
+// Тома под носитель: внутренняя память и все подключённые флешки. Выбранный
+// помнится по UUID, поэтому вынутая флешка остаётся выбранной — и помечается.
+let volumes = [];
+const gb = n => (n / 1073741824).toFixed(1) + ' ГБ';
+function paintVolumes() {
+  const box = document.getElementById('volumes');
+  const chosen = state.externalStorageUuid || '';
+  const rows = [{ uuid: '', label: 'Без носителя', note: 'тяжёлые ролики пропускаются' }]
+    .concat(volumes.map(v => ({ uuid: v.uuid, label: v.label + ' (' + v.uuid + ')',
+      note: gb(v.totalBytes) + ', свободно ' + gb(v.freeBytes) })));
+  if (chosen && !volumes.some(v => v.uuid === chosen)) {
+    rows.push({ uuid: chosen, label: 'Флешка ' + chosen, note: 'не подключена' });
+  }
+  box.innerHTML = rows.map(r =>
+    '<div class="volume' + (r.uuid === chosen ? ' on' : '') + '" data-uuid="' + r.uuid.replace(/"/g, '') + '">' +
+    '<span class="box">' + (r.uuid === chosen ? '◉' : '○') + '</span>' +
+    '<span>' + escapeHtml(r.label) + '<small>' + escapeHtml(r.note) + '</small></span></div>').join('');
+  box.querySelectorAll('.volume').forEach(el => el.addEventListener('click', () => {
+    state.externalStorageUuid = el.dataset.uuid; paintVolumes(); schedule();
+  }));
+}
+async function loadVolumes() {
+  try {
+    const d = await (await fetch('/api/storage')).json();
+    volumes = d.volumes || [];
+  } catch (e) { volumes = []; }
+  paintVolumes();
+}
+loadVolumes();
+setInterval(loadVolumes, 10000);
 
 let timer = null;
 function schedule() {
@@ -466,7 +527,8 @@ async function send() {
   // Ссылку сюда не кладём: она меняется отдельной кнопкой, иначе любое
   // движение ползунка перезапускало бы рамку.
   const body = FIELDS.concat(TOGGLES)
-    .map(f => f.key + '=' + encodeURIComponent(state[f.key])).join('&');
+    .map(f => f.key + '=' + encodeURIComponent(state[f.key])).join('&') +
+    '&externalStorageUuid=' + encodeURIComponent(state.externalStorageUuid || '');
   try {
     const res = await fetch('/api/settings', { method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
@@ -821,7 +883,8 @@ const diskLink = path => (state.folderUrl || '').replace(/\/+$/, '') +
 const linked = items => items.length
   ? items.map(x => typeof x === 'string' ? '<div>' + escapeHtml(x) + '</div>'
     : '<div><a href="' + diskLink(x.path).replace(/"/g, '&quot;') + '" target="_blank" rel="noopener">' +
-      escapeHtml(x.name) + '</a></div>').join('')
+      escapeHtml(x.name) + '</a>' + (x.bitrate ? ' <small>' + Math.round(x.bitrate / 1000000) + ' Мбит/с</small>' : '') +
+      '</div>').join('')
   : '<div class="empty">пусто</div>';
 
 async function loadState() {
@@ -849,6 +912,24 @@ async function loadState() {
       document.getElementById('streamnote').textContent = pr
         ? 'подкачка: ' + pr.name + ' — ' + Math.round(fill * 100) + ' %'
         : 'буфер потока: ' + bytes(c.primedBytes) + ' из ' + bytes(c.primeBudgetBytes);
+    }
+
+    const x = d.external || {};
+    const ar = x.archiving;
+    document.getElementById('external').innerHTML = !x.uuid
+      ? kv('носитель', 'не выбран') + kv('ждут носителя', x.waiting || 0)
+      : kv('носитель', (x.label || x.uuid) + (x.present ? '' : ' — не подключён')) +
+        (x.present ? kv('папка', x.path) + kv('занято', bytes(x.usedBytes)) + kv('свободно', bytes(x.freeBytes)) +
+          kv('файлов', x.files) : '') + kv('ждут носителя', x.waiting || 0);
+    document.getElementById('externalbar').style.width =
+      (x.present && x.totalBytes ? (x.totalBytes - x.freeBytes) / x.totalBytes * 100 : 0) + '%';
+    const aw = document.getElementById('archivewrap');
+    aw.hidden = !ar;
+    if (ar) {
+      const fill = ar.wantedBytes ? ar.doneBytes / ar.wantedBytes : 0;
+      document.getElementById('archivebar').style.width = Math.min(100, fill * 100) + '%';
+      document.getElementById('archivenote').textContent =
+        'качаю на носитель: ' + ar.name + ' — ' + Math.round(fill * 100) + ' % из ' + bytes(ar.wantedBytes);
     }
 
     const peak = Math.max(1, ...d.hourly);

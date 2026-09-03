@@ -18,6 +18,7 @@ import ru.dvedev.me.yaphotoframe.media.MediaItem
 import ru.dvedev.me.yaphotoframe.media.MediaKind
 import ru.dvedev.me.yaphotoframe.media.MediaSource
 import ru.dvedev.me.yaphotoframe.media.PreviewSize
+import ru.dvedev.me.yaphotoframe.video.DurationProber
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -103,6 +104,15 @@ class FrameEngine(
     private val primeBudgetBytes: () -> Long = { 0L },
     /** Сюда сообщается о ходе подкачки — владелец видит это в дневнике. */
     private val onPrime: (PrimeEvent) -> Unit = {},
+    /** Узнаёт длительность ролика по ссылке — для битрейта. */
+    private val prober: DurationProber = DurationProber.NONE,
+    /** Канал до хранилища, бит/с; ноль — всё потоком, как раньше. */
+    private val channelBps: () -> Long = { 0L },
+    /** Сколько ролика показывается; ноль — целиком. */
+    private val maxVideoDurationMillis: () -> Long = { 0L },
+    /** Носитель под тяжёлые ролики; null — не выбран или не подключён. */
+    private val external: () -> ExternalStore? = { null },
+    private val onArchive: (ArchiveEvent) -> Unit = {},
 ) {
 
     private val library = MediaLibrary(source, store, clock)
@@ -155,6 +165,14 @@ class FrameEngine(
     @Volatile
     var primingHeld = false
 
+    private val archiveLock = Any()
+    private var archiveJob: Job? = null
+    private var archiveJobPath: String? = null
+    private var probeJob: Job? = null
+
+    @Volatile
+    private var archiving: ArchiveState? = null
+
     /** Останавливает подкачку — когда движок больше не нужен. */
     fun close() {
         primeScope.cancel()
@@ -175,7 +193,24 @@ class FrameEngine(
         return all.filter { entry ->
             chosen.includes(entry.item.path) &&
                 (minimum <= 0 || !entry.isSmallerThan(minimum)) &&
-                (heaviest <= 0 || entry.item.kind != MediaKind.VIDEO || entry.item.sizeBytes <= heaviest)
+                (heaviest <= 0 || entry.item.kind != MediaKind.VIDEO || entry.item.sizeBytes <= heaviest) &&
+                deliveryPlan(entry.item) != PlannedDelivery.Skip
+        }
+    }
+
+    /** Битрейт ролика, если длительность уже измерена. */
+    fun bitrateOf(path: String): Long? = entryOf(path)?.bitrateBps
+
+    /** Сколько роликов ждут носителя: тяжелее канала, а класть некуда. */
+    fun waitingForStorage(): Int {
+        if (!includeVideo()) return 0
+        val chosen = selection()
+        val heaviest = maxVideoBytes()
+        return library.showable().count { entry ->
+            entry.item.kind == MediaKind.VIDEO &&
+                chosen.includes(entry.item.path) &&
+                (heaviest <= 0 || entry.item.sizeBytes <= heaviest) &&
+                deliveryPlan(entry.item) == PlannedDelivery.Skip
         }
     }
 
@@ -220,8 +255,7 @@ class FrameEngine(
         if (!queued) synchronized(primeLock) { if (primedWaiting == waiting) primedWaiting = null }
     }
 
-    private fun entryOf(path: String): LibraryEntry? =
-        library.entries.firstOrNull { it.item.path == path }
+    private fun entryOf(path: String): LibraryEntry? = library.entryOf(path)
 
     private fun isTooSmall(path: String): Boolean =
         entryOf(path)?.isSmallerThan(minPhotoLongSide()) == true
@@ -245,7 +279,48 @@ class FrameEngine(
         withContext(Dispatchers.IO) { forgetVanished(vanished) }
         cancelStrayPriming()
         releasePrimedIfGone()
+        startProbeSweep()
         return outcome
+    }
+
+    /**
+     * Замеряет длительность всем роликам, которым она нужна, в фоне.
+     *
+     * Из очереди замер идёт по одному ролику за подготовку — при сотнях
+     * роликов на это ушли бы часы, и всё это время они стояли бы «на замере».
+     * Обход же делает по два маленьких запроса на ролик и укладывается в минуты.
+     */
+    private fun startProbeSweep() {
+        if (channelBps() <= 0) return
+        synchronized(archiveLock) {
+            if (probeJob?.isActive == true) return
+            probeJob = primeScope.launch { probeSweep() }
+        }
+    }
+
+    private suspend fun probeSweep() {
+        val threshold = policy().itemThresholdBytes
+        val pending = library.showable().filter { entry ->
+            entry.item.kind == MediaKind.VIDEO && entry.item.sizeBytes > threshold && entry.durationMillis == null
+        }
+        for (entry in pending) {
+            // Могли замерить из очереди, пока обход шёл.
+            if (entryOf(entry.item.path)?.durationMillis != null) continue
+            try {
+                probe(entry.item)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Сеть легла — остальным подождать следующего обхода.
+                coroutineContext.ensureActive()
+                return
+            }
+        }
+    }
+
+    /** Дожидается фонового замера — для тестов. */
+    suspend fun awaitProbing() {
+        synchronized(archiveLock) { probeJob }?.join()
     }
 
     /**
@@ -270,9 +345,11 @@ class FrameEngine(
      */
     private fun forgetVanished(vanished: Set<String>) {
         if (vanished.isEmpty()) return
+        val store = external()
         vanished.forEach { path ->
             PreviewSize.entries.forEach { size -> cache.remove(previewKey(path, size)) }
             cache.remove(originalKey(path))
+            store?.remove(path)
         }
     }
 
@@ -406,10 +483,16 @@ class FrameEngine(
         var fetched = 0
         var streamed = 0
         var primingRequested = false
+        var archiveRequested = false
 
         for (item in upcoming()) {
             try {
-                when (deliveryPlan(item)) {
+                var plan = deliveryPlan(item)
+                if (plan == PlannedDelivery.Probe) {
+                    probe(item)
+                    plan = deliveryPlan(item)
+                }
+                when (plan) {
                     PlannedDelivery.Cached -> {
                         ensureCached(item)
                         fetched++
@@ -426,6 +509,21 @@ class FrameEngine(
                             startPriming(item)
                         }
                     }
+
+                    PlannedDelivery.Archive -> {
+                        // На носитель — по одному: канал один, и два ролика
+                        // разом приехали бы позже, чем по очереди.
+                        if (isWaiting(item) && !archiveRequested) {
+                            archiveRequested = true
+                            startArchiving(item)
+                        }
+                    }
+
+                    // Замер не удался и сейчас — попробуем в следующий раз.
+                    PlannedDelivery.Probe -> Unit
+
+                    // Носитель пропал, пока ролик стоял в очереди.
+                    PlannedDelivery.Skip -> queueLock.withLock { queue.remove(item.path) }
                 }
             } catch (e: Exception) {
                 // Один недоступный файл не должен срывать подготовку остальных,
@@ -437,8 +535,15 @@ class FrameEngine(
 
         // Перебор директории кэша — сотни stat-вызовов; главному потоку тут
         // делать нечего, он в это время рисует переход.
-        val evicted = withContext(Dispatchers.IO) { cache.evict() }
+        val evicted = withContext(Dispatchers.IO) { cache.evict() + (external()?.evict() ?: 0) }
+        startProbeSweep()
         return PrefetchOutcome(fetched = fetched, streamed = streamed, evicted = evicted)
+    }
+
+    /** Узнаёт длительность ролика и запоминает; сеть легла — исключение, пробуем позже. */
+    private suspend fun probe(item: MediaItem) {
+        val millis = prober.probe(source.downloadUrl(item), item.sizeBytes)
+        library.recordDuration(item.path, millis ?: 0L)
     }
 
     /** Как показывать этот элемент: из кэша или потоком. */
@@ -447,6 +552,67 @@ class FrameEngine(
         // Ключ — путь, а не ссылка: ссылки подписаны и меняются, а подкачанное
         // под старой должно пригодиться и под новой.
         PlannedDelivery.Stream -> Delivery.Streamed(source.downloadUrl(item), cacheKey = item.path)
+        PlannedDelivery.Probe -> {
+            probe(item)
+            check(deliveryPlan(item) != PlannedDelivery.Probe) { "длительность ${item.name} не узнать" }
+            deliver(item)
+        }
+        PlannedDelivery.Archive -> {
+            val store = checkNotNull(external()) { "носитель отключён" }
+            // Лежащий на носителе не требует даже ссылки: за ней ходят к API.
+            if (store.has(item.path)) Delivery.Local(store.file(item.path))
+            else Delivery.Local(store.fetch(item, source.downloadUrl(item)) {})
+        }
+        PlannedDelivery.Skip -> error("ролик ${item.name} тяжелее канала, а носителя нет")
+    }
+
+    /** Ролик стоит в очереди, но на экран пока не идёт: ждёт замера, подкачки или носителя. */
+    private fun isWaiting(item: MediaItem): Boolean = when (deliveryPlan(item)) {
+        PlannedDelivery.Probe -> true
+        PlannedDelivery.Stream -> isPendingStream(item)
+        PlannedDelivery.Archive -> external()?.has(item.path) != true
+        else -> false
+    }
+
+    private fun startArchiving(item: MediaItem) {
+        synchronized(archiveLock) {
+            if (archiveJob?.isActive == true) {
+                if (archiveJobPath == item.path) return
+                archiveJob?.cancel()
+            }
+            archiveJobPath = item.path
+            archiveJob = primeScope.launch { archive(item) }
+        }
+    }
+
+    private suspend fun archive(item: MediaItem) {
+        val store = external() ?: return
+        val state = ArchiveState(item = item, wantedBytes = item.sizeBytes, startedAtMillis = clock())
+        archiving = state
+        onArchive(ArchiveEvent.Started(item))
+        try {
+            store.fetch(item, source.downloadUrl(item)) { state.doneBytes = it }
+            onArchive(ArchiveEvent.Finished(item, clock() - state.startedAtMillis))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            coroutineContext.ensureActive()
+            val reason = e.message ?: e.javaClass.simpleName
+            synchronized(failures) { failures[item.path] = reason }
+            // Из очереди вон: иначе он держал бы место ожидающего до бесконечности.
+            queueLock.withLock { queue.remove(item.path) }
+            onArchive(ArchiveEvent.Failed(item, reason))
+        } finally {
+            archiving = null
+        }
+    }
+
+    /** Что качается на носитель прямо сейчас; null — ничего. */
+    fun archiveState(): ArchiveState? = archiving
+
+    /** Дожидается закачки на носитель — для тестов. */
+    suspend fun awaitArchiving() {
+        synchronized(archiveLock) { archiveJob }?.join()
     }
 
     /** Сколько байт ролика стоит подкачать: всё, что влезает в буфер, но не больше самого ролика. */
@@ -458,7 +624,6 @@ class FrameEngine(
 
     /** Ролик потоком, чьё начало ещё не подкачано: в очереди стоит, на экран не идёт. */
     private fun isPendingStream(item: MediaItem): Boolean {
-        if (deliveryPlan(item) != PlannedDelivery.Stream) return false
         val wanted = primeWanted(item)
         if (wanted <= 0) return false
         if (synchronized(primeLock) { item.path in primeFailed || item.path in primedPaths }) return false
@@ -557,10 +722,31 @@ class FrameEngine(
 
     private fun originalKey(path: String) = CacheKey.forOriginal(path)
 
-    private fun deliveryPlan(item: MediaItem): PlannedDelivery = when {
-        item.kind == MediaKind.PHOTO -> PlannedDelivery.Cached
-        item.sizeBytes <= policy().itemThresholdBytes -> PlannedDelivery.Cached
-        else -> PlannedDelivery.Stream
+    /**
+     * Лестница: первое подошедшее правило решает, откуда ролик пойдёт.
+     *
+     * Лёгкое — в кэш. Что не тяжелее канала — потоком, как и то, чья
+     * показываемая часть целиком помещается в подкачку: такое не заикнётся.
+     * Остальное — на носитель, а без носителя — мимо: заикающийся ролик хуже
+     * пропущенного. Пока длительность не измерена, битрейт неизвестен, и
+     * ролик ждёт замера.
+     */
+    private fun deliveryPlan(item: MediaItem): PlannedDelivery {
+        if (item.kind == MediaKind.PHOTO) return PlannedDelivery.Cached
+        if (item.sizeBytes <= policy().itemThresholdBytes) return PlannedDelivery.Cached
+        val channel = channelBps()
+        if (channel <= 0) return PlannedDelivery.Stream
+        val entry = entryOf(item.path)
+        val duration = entry?.durationMillis ?: return PlannedDelivery.Probe
+        val bitrate = entry.bitrateBps
+        if (bitrate != null) {
+            if (bitrate <= channel) return PlannedDelivery.Stream
+            val cap = maxVideoDurationMillis()
+            val shownMillis = if (cap > 0) minOf(cap, duration) else duration
+            val shownBytes = item.sizeBytes * shownMillis / duration
+            if (shownBytes <= primeBudgetBytes() - PRIME_HEADROOM_BYTES) return PlannedDelivery.Stream
+        }
+        return if (external() != null) PlannedDelivery.Archive else PlannedDelivery.Skip
     }
 
     private suspend fun ensureCached(item: MediaItem): File =
@@ -576,7 +762,7 @@ class FrameEngine(
             fetcher.ensure(CacheKey.forOriginal(item), source.downloadUrl(item))
         }
 
-    private enum class PlannedDelivery { Cached, Stream }
+    private enum class PlannedDelivery { Cached, Stream, Probe, Archive, Skip }
 
     /** Ближайшие кадры — их и предстоит подгрузить заранее. */
     suspend fun upcoming(): List<MediaItem> = withContext(Dispatchers.Default) {
@@ -608,9 +794,14 @@ class FrameEngine(
                 iterator.remove()
                 continue
             }
-            // Ролик потоком ждёт подкачки на месте, показ идёт мимо него:
-            // как начало приедет — выйдет на экран.
-            if (isPendingStream(entry.item)) continue
+            // Носитель пропал, пока ролик стоял в очереди.
+            if (deliveryPlan(entry.item) == PlannedDelivery.Skip) {
+                iterator.remove()
+                continue
+            }
+            // Ожидающий (замера, подкачки, носителя) стоит на месте, показ идёт
+            // мимо него: как приедет — выйдет на экран.
+            if (isWaiting(entry.item)) continue
             iterator.remove()
             library.markShown(path)
             // Подкачанный пошёл на экран — буфер свободен под следующего.
@@ -629,11 +820,11 @@ class FrameEngine(
         }
 
         val queued = queue.toMutableSet()
-        var pending = queue.count { path -> entryOf(path)?.let { isPendingStream(it.item) } == true }
+        var pending = queue.count { path -> entryOf(path)?.let { isWaiting(it.item) } == true }
         while (queue.size < policy().prefetchCount) {
             val next = playlist.pick(candidates, queued, clock()) ?: break
             queued += next.item.path
-            if (isPendingStream(next.item)) {
+            if (isWaiting(next.item)) {
                 // В очереди держим не больше одного неподкачанного: буфер
                 // один, и второй ролик вытеснил бы из него первый.
                 if (pending >= 1) continue
@@ -721,3 +912,39 @@ data class CacheState(
 
 /** Что сделала подготовка: сколько положено в кэш, сколько оставлено потоку, сколько вытеснено. */
 data class PrefetchOutcome(val fetched: Int, val streamed: Int, val evicted: Int)
+
+/**
+ * Носитель: тяжёлые ролики лежат на нём целиком, под своими путями.
+ *
+ * Ключ — путь на хранилище, так что на флешке получается то же дерево, что и
+ * на Диске: её можно вынуть и показать где угодно.
+ */
+interface ExternalStore {
+    fun has(path: String): Boolean
+
+    /** Лежащий файл; обращение отмечается, чтобы вытеснялось давно не показанное. */
+    fun file(path: String): File
+
+    /** Пути всего, что лежит, — чтобы прибрать удалённое на хранилище. */
+    fun keys(): List<String>
+
+    fun remove(path: String): Boolean
+
+    /** Отдаёт файл, при необходимости скачав; уже лежащий не качается снова. */
+    suspend fun fetch(item: MediaItem, url: String, onProgress: (Long) -> Unit): File
+
+    /** Освобождает место до запаса; возвращает, сколько файлов удалено. */
+    fun evict(): Int
+}
+
+/** Ход закачки на носитель. */
+class ArchiveState(val item: MediaItem, val wantedBytes: Long, val startedAtMillis: Long) {
+    @Volatile
+    var doneBytes: Long = 0L
+}
+
+sealed class ArchiveEvent {
+    data class Started(val item: MediaItem) : ArchiveEvent()
+    data class Finished(val item: MediaItem, val tookMillis: Long) : ArchiveEvent()
+    data class Failed(val item: MediaItem, val reason: String) : ArchiveEvent()
+}

@@ -43,11 +43,13 @@ class MediaCache(
      */
     fun put(key: String, write: (File) -> Unit): File {
         val target = file(key)
+        // Ключ бывает путём с папками — на носителе дерево как на хранилище.
+        target.parentFile?.mkdirs()
         // Имя временного файла уникально на каждую попытку. С общим именем две
         // одновременные подготовки одного и того же кадра дрались за него:
         // первая переименовывала файл, вторая не находила его и падала.
         // Наблюдалось на устройстве — один снимок стабильно не попадал в кэш.
-        val temporary = File(directory, "$key.${System.nanoTime()}.part")
+        val temporary = File(target.parentFile, "${target.name}.${System.nanoTime()}.part")
         try {
             write(temporary)
             if (target.exists()) target.delete()
@@ -62,7 +64,18 @@ class MediaCache(
     /** Убирает файл из кэша. Возвращает, был ли он там вообще. */
     fun remove(key: String): Boolean {
         val file = file(key)
-        return file.isFile && file.delete()
+        val removed = file.isFile && file.delete()
+        if (removed) pruneEmpty(file.parentFile)
+        return removed
+    }
+
+    /** Пустые папки после удалённого файла не нужны — на флешке они мозолят глаза. */
+    private fun pruneEmpty(folder: File?) {
+        var current = folder
+        while (current != null && current != directory && current.list()?.isEmpty() == true) {
+            if (!current.delete()) return
+            current = current.parentFile
+        }
     }
 
     fun totalBytes(): Long = entries().sumOf { it.length() }
@@ -70,7 +83,10 @@ class MediaCache(
     fun count(): Int = entries().size
 
     /** Ключи всего, что лежит, — чтобы прибрать то, на что никто не ссылается. */
-    fun keys(): List<String> = entries().map { it.name }
+    fun keys(): List<String> = entries().map { keyOf(it) }
+
+    private fun keyOf(file: File): String =
+        file.relativeTo(directory).path.replace(File.separatorChar, '/')
 
     /** Сколько места свободно на разделе, где живёт кэш. */
     fun usableSpace(): Long = directory.usableSpace
@@ -91,6 +107,7 @@ class MediaCache(
             if (file.delete()) {
                 total -= size
                 removed++
+                pruneEmpty(file.parentFile)
             }
         }
         return removed
@@ -101,11 +118,29 @@ class MediaCache(
     }
 
     private fun entries(): List<File> =
-        directory.listFiles()?.filter { it.isFile && !it.name.endsWith(".part") }.orEmpty()
+        directory.walkTopDown().filter { it.isFile && !it.name.endsWith(".part") }.toList()
 
     /** Прибирает недописанное, оставшееся от прерванных загрузок. */
     fun sweepLeftovers() {
-        directory.listFiles()?.filter { it.isFile && it.name.endsWith(".part") }
-            ?.forEach { it.delete() }
+        directory.walkTopDown().filter { it.isFile && it.name.endsWith(".part") }
+            .toList().forEach { it.delete() }
+    }
+
+    companion object {
+        /**
+         * Бюджет «всё свободное минус запас» — для носителя.
+         *
+         * Флешка отдана рамке целиком, и число в гигабайтах владельцу вписывать
+         * незачем: занять можно всё, что есть, оставив немного на случай, если
+         * флешкой пользуются и для другого.
+         */
+        fun reserveBudget(
+            directory: File,
+            reserveBytes: () -> Long,
+            usableSpace: () -> Long = { directory.usableSpace },
+        ): () -> Long = {
+            val used = directory.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+            used + usableSpace() - reserveBytes()
+        }
     }
 }
