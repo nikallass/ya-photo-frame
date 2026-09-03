@@ -307,6 +307,10 @@ class SetupActivity : Activity() {
             { if (it.videoMaxSizeBytes <= 0) "без ограничения" else "${it.videoMaxSizeBytes / 1_048_576} МБ" }) { s, d ->
             s.copy(videoMaxSizeBytes = (s.videoMaxSizeBytes + d * 128L * 1_048_576).coerceAtLeast(0L))
         }
+        rows += Row("Подкачка потока", "тяжёлому ролику заранее; 0 — нет",
+            { if (it.streamBufferBytes <= 0) "нет" else "${it.streamBufferBytes / 1_048_576} МБ" }) { s, d ->
+            s.copy(streamBufferBytes = (s.streamBufferBytes + d * 128L * 1_048_576).coerceAtLeast(0L))
+        }
         rows += Row("Звук в роликах", "по умолчанию нет", { yesNo(it.videoSoundEnabled) },
             step = { s, _ -> s.copy(videoSoundEnabled = !s.videoSoundEnabled) })
         rows += Row("Минимальная ширина", "уже — не показывать",

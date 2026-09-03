@@ -21,5 +21,9 @@ sealed interface Delivery {
      * Хранилище отдаёт частичное содержимое по запросу диапазона — проверено на
      * живом API, — поэтому качать целиком ради показа не требуется.
      */
-    data class Streamed(val url: String) : Delivery
+    data class Streamed(
+        val url: String,
+        /** Под этим именем начало ролика лежит в буфере потока; null — без буфера. */
+        val cacheKey: String? = null,
+    ) : Delivery
 }

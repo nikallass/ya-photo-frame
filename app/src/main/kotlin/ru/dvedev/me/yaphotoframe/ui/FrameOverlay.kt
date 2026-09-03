@@ -49,6 +49,20 @@ class FrameOverlay(context: Context) : FrameLayout(context) {
         pauseView.visibility = if (paused) VISIBLE else GONE
     }
 
+    private val soundView = TextView(context).apply {
+        text = "♪"
+        textSize = 24f
+        setTextColor(Color.WHITE)
+        alpha = 0.6f
+        setShadowLayer(10f, 0f, 2f, Color.BLACK)
+        visibility = GONE
+    }
+
+    /** Нотка в нижнем углу, пока ролик идёт со звуком: звук включают с пульта вслепую. */
+    fun setSound(on: Boolean) {
+        soundView.visibility = if (on) VISIBLE else GONE
+    }
+
     private val handler = Handler(Looper.getMainLooper())
     private var startedAtMillis = System.currentTimeMillis()
     private var atRightCorner = true
@@ -77,6 +91,14 @@ class FrameOverlay(context: Context) : FrameLayout(context) {
                 LayoutParams.WRAP_CONTENT,
                 Gravity.BOTTOM or Gravity.START,
             ).apply { leftMargin = MARGIN; bottomMargin = MARGIN },
+        )
+        addView(
+            soundView,
+            LayoutParams(
+                LayoutParams.WRAP_CONTENT,
+                LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM or Gravity.END,
+            ).apply { rightMargin = MARGIN; bottomMargin = MARGIN },
         )
         layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
     }

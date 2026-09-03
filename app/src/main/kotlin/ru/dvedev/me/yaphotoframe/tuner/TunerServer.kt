@@ -319,6 +319,8 @@ class TunerServer(
                     ?: current.videoSoundEnabled,
                 videoMaxSizeBytes = values["videoMaxSizeBytes"]?.toLongOrNull()
                     ?: current.videoMaxSizeBytes,
+                streamBufferBytes = values["streamBufferBytes"]?.toLongOrNull()
+                    ?: current.streamBufferBytes,
                 pairPortraits = values["pairPortraits"]?.toBooleanStrictOrNull()
                     ?: current.pairPortraits,
                 freshnessWindowDays = values["freshnessWindowDays"]?.toIntOrNull()
@@ -367,6 +369,7 @@ class TunerServer(
         append("\"videoMaxDurationMillis\":").append(settings.videoMaxDurationMillis).append(',')
         append("\"videoSoundEnabled\":").append(settings.videoSoundEnabled).append(',')
         append("\"videoMaxSizeBytes\":").append(settings.videoMaxSizeBytes).append(',')
+        append("\"streamBufferBytes\":").append(settings.streamBufferBytes).append(',')
         append("\"pairPortraits\":").append(settings.pairPortraits).append(',')
         append("\"freshnessWindowDays\":").append(settings.freshnessWindowDays).append(',')
         append("\"minPhotoFraction\":").append(settings.minPhotoFraction).append(',')

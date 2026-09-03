@@ -52,15 +52,6 @@ class FrameEngine(
     private val cache: MediaCache,
     private val folderStore: FolderIndexStore,
     private val fetcher: MediaFetcher,
-    /**
-     * Отдельное место под тяжёлые ролики — вне бюджета кэша.
-     *
-     * Съёмка с фотоаппарата весит гигабайт, а бюджет кэша — столько же: попав в
-     * общий кэш, один ролик вытеснил бы всю библиотеку снимков. Здесь лежит
-     * один-два файла: тот, что показывается, и тот, что качается следующим.
-     */
-    private val heavyCache: MediaCache,
-    private val heavyFetcher: MediaFetcher,
     private val policy: () -> CachePolicy = { CachePolicy() },
     private val clock: () -> Long = System::currentTimeMillis,
     random: Random = Random.Default,
@@ -96,10 +87,19 @@ class FrameEngine(
     private val selection: () -> FolderSelection = { FolderSelection.ALL },
     /** Тяжелее скольких байт ролик не брать; ноль — без ограничения. */
     private val maxVideoBytes: () -> Long = { 0L },
-    /** Сколько места свободно под тяжёлый ролик; снаружи — ради тестов. */
-    private val freeBytes: () -> Long = { heavyCache.usableSpace() },
-    /** Сюда сообщается о ходе закачки тяжёлых роликов — владелец видит это в дневнике. */
-    private val onHeavy: (HeavyEvent) -> Unit = {},
+    /**
+     * Подкачка потока заранее.
+     *
+     * Тяжёлый ролик целиком на устройство не кладётся — места нет. Но канал
+     * телевизора не тянет битрейт съёмки, и ролик, начатый с пустым буфером,
+     * заикается с первых секунд. Поэтому его начало подкачивается заранее в
+     * буфер ограниченного объёма, а на экран он выходит, когда начало на месте.
+     */
+    private val primer: StreamPrimer = StreamPrimer.NONE,
+    /** Сколько места отдано под подкачку; ноль — не подкачивать. */
+    private val primeBudgetBytes: () -> Long = { 0L },
+    /** Сюда сообщается о ходе подкачки — владелец видит это в дневнике. */
+    private val onPrime: (PrimeEvent) -> Unit = {},
 ) {
 
     private val library = MediaLibrary(source, store, clock)
@@ -118,28 +118,36 @@ class FrameEngine(
     private var folderIndex: FolderIndex = folderStore.load()
 
     /**
-     * Закачка тяжёлого ролика живёт своей жизнью: подготовка кадров идёт
-     * каждые несколько секунд и не может ждать гигабайт.
+     * Подкачка живёт своей жизнью: подготовка кадров идёт каждые несколько
+     * секунд и не может ждать сотни мегабайт.
      */
-    private val heavyScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val heavyLock = Any()
-    private var heavyJob: Job? = null
-    private var heavyJobPath: String? = null
+    private val primeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val primeLock = Any()
+    private var primeJob: Job? = null
+    private var primeJobPath: String? = null
 
     @Volatile
-    private var heavyDownload: HeavyDownload? = null
+    private var priming: PrimeState? = null
 
-    /** Тяжёлый ролик, который сейчас на экране: его файл трогать нельзя. */
-    @Volatile
-    private var showingHeavyPath: String? = null
+    /** Ролики, чью подкачку уже пробовали и не смогли: второй раз не ждём. */
+    private val primeFailed = mutableSetOf<String>()
 
-    init {
-        heavyCache.sweepLeftovers()
-    }
+    /** Ролики, подкачанные за этот запуск: их не ждём, даже если буфер уже что-то вытеснил. */
+    private val primedPaths = mutableSetOf<String>()
 
-    /** Останавливает фоновую закачку — когда движок больше не нужен. */
+    /**
+     * Подкачанный, но ещё не показанный ролик.
+     *
+     * Пока он стоит в очереди, следующую подкачку не начинаем: буфер один, и
+     * второй ролик вытеснил бы из него начало первого — тот снова считался бы
+     * неподкачанным, и карусель шла бы по кругу, а играли бы оба с пустым
+     * буфером.
+     */
+    private var primedWaiting: String? = null
+
+    /** Останавливает подкачку — когда движок больше не нужен. */
     fun close() {
-        heavyScope.cancel()
+        primeScope.cancel()
     }
 
     val entries: List<LibraryEntry> get() = library.entries
@@ -173,25 +181,33 @@ class FrameEngine(
             queue.retainAll { chosen.includes(it) }
             refill()
         }
-        cancelStrayHeavy()
+        cancelStrayPriming()
+        releasePrimedIfGone()
     }
 
-    /** Гасит закачку ролика, которого в очереди больше нет: гигабайт впустую ни к чему. */
-    private suspend fun cancelStrayHeavy() {
-        val stray = synchronized(heavyLock) {
-            val path = heavyJobPath ?: return
-            if (heavyJob?.isActive != true) return
+    /** Гасит подкачку ролика, которого в очереди больше нет: сотни мегабайт впустую ни к чему. */
+    private suspend fun cancelStrayPriming() {
+        val stray = synchronized(primeLock) {
+            val path = primeJobPath ?: return
+            if (primeJob?.isActive != true) return
             path
         }
         val queued = queueLock.withLock { stray in queue }
         if (queued) return
-        synchronized(heavyLock) {
-            if (heavyJobPath == stray) {
-                heavyJob?.cancel()
-                heavyJob = null
-                heavyJobPath = null
+        synchronized(primeLock) {
+            if (primeJobPath == stray) {
+                primeJob?.cancel()
+                primeJob = null
+                primeJobPath = null
             }
         }
+    }
+
+    /** Подкачанный ролик из очереди выбыл, не дойдя до экрана, — очередь подкачки свободна. */
+    private suspend fun releasePrimedIfGone() {
+        val waiting = synchronized(primeLock) { primedWaiting } ?: return
+        val queued = queueLock.withLock { waiting in queue }
+        if (!queued) synchronized(primeLock) { if (primedWaiting == waiting) primedWaiting = null }
     }
 
     private fun entryOf(path: String): LibraryEntry? =
@@ -217,7 +233,8 @@ class FrameEngine(
         // Копии исчезнувшего убираются уже без замка: удаление тысяч файлов
         // на флеш-памяти — секунды, и всё это время очередь была бы недоступна.
         withContext(Dispatchers.IO) { forgetVanished(vanished) }
-        cancelStrayHeavy()
+        cancelStrayPriming()
+        releasePrimedIfGone()
         return outcome
     }
 
@@ -246,7 +263,6 @@ class FrameEngine(
         vanished.forEach { path ->
             PreviewSize.entries.forEach { size -> cache.remove(previewKey(path, size)) }
             cache.remove(originalKey(path))
-            heavyCache.remove(originalKey(path))
         }
     }
 
@@ -337,16 +353,16 @@ class FrameEngine(
         usedBytes = cache.totalBytes(),
         budgetBytes = policy().budgetBytes,
         files = cache.count(),
-        heavyBytes = heavyCache.totalBytes(),
-        heavyFiles = heavyCache.count(),
+        primedBytes = primer.usedBytes(),
+        primeBudgetBytes = primeBudgetBytes(),
     )
 
-    /** Что качается заранее прямо сейчас; null — ничего. */
-    fun heavyState(): HeavyDownload? = heavyDownload
+    /** Что подкачивается прямо сейчас; null — ничего. */
+    fun primeState(): PrimeState? = priming
 
-    /** Ждёт конца текущей закачки тяжёлого ролика — для тестов. */
-    suspend fun awaitHeavy() {
-        val job = synchronized(heavyLock) { heavyJob } ?: return
+    /** Ждёт конца текущей подкачки — для тестов. */
+    suspend fun awaitPriming() {
+        val job = synchronized(primeLock) { primeJob } ?: return
         job.join()
     }
 
@@ -354,14 +370,13 @@ class FrameEngine(
      * Подтягивает ближайшие кадры и освобождает место под бюджет.
      *
      * Одно и то же правило для фотографий и для видео: что легче порога —
-     * оседает в кэше целиком здесь же, пока висит текущий кадр. Уменьшенные
-     * копии фотографий всегда легче порога, поэтому библиотека снимков со
-     * временем оказывается на устройстве целиком сама собой.
+     * оседает в кэше целиком, что тяжелее — не качается вовсе и пойдёт потоком.
+     * Уменьшенные копии фотографий всегда легче порога, поэтому библиотека
+     * снимков со временем оказывается на устройстве целиком сама собой.
      *
-     * Что тяжелее порога — ролик с фотоаппарата на гигабайт — качается отдельно
-     * и в фоне, по одному, и в показ попадает только когда лежит на диске
-     * целиком: потоком такое заикалось каждые несколько секунд, канал
-     * телевизора не тянет битрейт съёмки, а пережатых вариантов Диск не отдаёт.
+     * Потоку — подкачка начала заранее, по одному ролику за раз, в буфер
+     * заданного объёма: две параллельные делят канал пополам и обе приезжают
+     * позже, чем приехали бы по очереди.
      *
      * Оригиналы фотографий не скачиваются никогда: показывается уменьшенная
      * копия, а оригинал в четырнадцать мегабайт не нужен ни для чего.
@@ -379,7 +394,8 @@ class FrameEngine(
 
     private suspend fun doPrefetch(): PrefetchOutcome {
         var fetched = 0
-        var heavy = 0
+        var streamed = 0
+        var primingRequested = false
 
         for (item in upcoming()) {
             try {
@@ -392,9 +408,13 @@ class FrameEngine(
                         if (isTooSmall(item.path)) queueLock.withLock { queue.remove(item.path) }
                     }
 
-                    PlannedDelivery.Heavy -> {
-                        heavy++
-                        if (!heavyReady(item)) startHeavy(item)
+                    PlannedDelivery.Stream -> {
+                        streamed++
+                        // Подкачивается только первый по очереди из тех, что ждут.
+                        if (isPendingStream(item) && !primingRequested) {
+                            primingRequested = true
+                            startPriming(item)
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -408,90 +428,69 @@ class FrameEngine(
         // Перебор директории кэша — сотни stat-вызовов; главному потоку тут
         // делать нечего, он в это время рисует переход.
         val evicted = withContext(Dispatchers.IO) { cache.evict() }
-        return PrefetchOutcome(fetched = fetched, heavy = heavy, evicted = evicted)
+        return PrefetchOutcome(fetched = fetched, streamed = streamed, evicted = evicted)
     }
 
-    /**
-     * Как показывать этот элемент: из кэша или потоком.
-     *
-     * Потоком идёт только тяжёлый ролик, которого на диске уже нет, — например,
-     * при листании назад к показанному и прибранному. В обычном порядке до
-     * экрана доходит лишь то, что скачано.
-     */
+    /** Как показывать этот элемент: из кэша или потоком. */
     suspend fun deliver(item: MediaItem): Delivery = when (deliveryPlan(item)) {
         PlannedDelivery.Cached -> Delivery.Local(ensureCached(item))
-        PlannedDelivery.Heavy -> {
-            val key = originalKey(item.path)
-            if (heavyCache.has(key)) {
-                showingHeavyPath = item.path
-                heavyCache.touch(key)
-                Delivery.Local(heavyCache.file(key))
-            } else {
-                Delivery.Streamed(source.downloadUrl(item))
+        // Ключ — путь, а не ссылка: ссылки подписаны и меняются, а подкачанное
+        // под старой должно пригодиться и под новой.
+        PlannedDelivery.Stream -> Delivery.Streamed(source.downloadUrl(item), cacheKey = item.path)
+    }
+
+    /** Сколько байт ролика стоит подкачать: всё, что влезает в буфер, но не больше самого ролика. */
+    private fun primeWanted(item: MediaItem): Long {
+        val budget = primeBudgetBytes() - PRIME_HEADROOM_BYTES
+        if (budget <= 0) return 0L
+        return minOf(item.sizeBytes, budget)
+    }
+
+    /** Ролик потоком, чьё начало ещё не подкачано: в очереди стоит, на экран не идёт. */
+    private fun isPendingStream(item: MediaItem): Boolean {
+        if (deliveryPlan(item) != PlannedDelivery.Stream) return false
+        val wanted = primeWanted(item)
+        if (wanted <= 0) return false
+        if (synchronized(primeLock) { item.path in primeFailed || item.path in primedPaths }) return false
+        return primer.primedBytes(item.path, wanted) < wanted
+    }
+
+    private fun startPriming(item: MediaItem) {
+        synchronized(primeLock) {
+            // Подкачанный ждёт показа — буфер занят им, следующий подождёт.
+            if (primedWaiting != null && primedWaiting != item.path) return
+            if (primeJob?.isActive == true) {
+                if (primeJobPath == item.path) return
+                primeJob?.cancel()
             }
+            primeJobPath = item.path
+            primeJob = primeScope.launch { prime(item) }
         }
     }
 
-    private fun heavyReady(item: MediaItem): Boolean = heavyCache.has(originalKey(item.path))
-
-    /** Хватит ли места: сам ролик плюс запас, чтобы не забить раздел под ноль. */
-    private fun heavyFits(item: MediaItem): Boolean =
-        item.sizeBytes + HEAVY_SPACE_RESERVE_BYTES <= freeBytes()
-
-    /**
-     * Запускает закачку тяжёлого ролика, если она ещё не идёт.
-     *
-     * Одна за раз: две параллельные делят канал пополам, и обе приезжают позже,
-     * чем приехали бы по очереди. Если качается уже другой ролик — значит, его в
-     * очереди больше нет, и продолжать незачем.
-     */
-    private fun startHeavy(item: MediaItem) {
-        synchronized(heavyLock) {
-            if (heavyJob?.isActive == true) {
-                if (heavyJobPath == item.path) return
-                heavyJob?.cancel()
-            }
-            heavyJobPath = item.path
-            heavyJob = heavyScope.launch { downloadHeavy(item) }
-        }
-    }
-
-    private suspend fun downloadHeavy(item: MediaItem) {
-        val download = HeavyDownload(item = item, startedAtMillis = clock())
-        heavyDownload = download
-        onHeavy(HeavyEvent.Started(item))
+    private suspend fun prime(item: MediaItem) {
+        val wanted = primeWanted(item)
+        val state = PrimeState(item = item, wantedBytes = wanted, startedAtMillis = clock())
+        priming = state
+        onPrime(PrimeEvent.Started(item, wanted))
         try {
-            sweepHeavy()
-            val file = heavyFetcher.ensure(originalKey(item.path), source.downloadUrl(item)) {
-                download.doneBytes = it
+            primer.prime(item.path, source.downloadUrl(item), wanted) { state.doneBytes = it }
+            synchronized(primeLock) {
+                primedPaths += item.path
+                primedWaiting = item.path
             }
-            onHeavy(HeavyEvent.Finished(item, clock() - download.startedAtMillis, file.length()))
+            onPrime(PrimeEvent.Finished(item, clock() - state.startedAtMillis, wanted))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             val reason = e.message ?: e.javaClass.simpleName
-            synchronized(failures) { failures[item.path] = reason }
-            // Не скачался — в очереди ему делать нечего, а отметка о показе
-            // отодвигает следующую попытку: иначе он тут же выпал бы снова.
-            queueLock.withLock {
-                queue.remove(item.path)
-                library.markShown(item.path)
-                refill()
-            }
-            onHeavy(HeavyEvent.Failed(item, reason))
+            // Не подкачался — пусть идёт потоком как есть: ждать дальше
+            // нечего, а пропускать ролик из-за буфера было бы обидно.
+            synchronized(primeLock) { primeFailed += item.path }
+            onPrime(PrimeEvent.Failed(item, reason))
         } finally {
-            heavyDownload = null
+            priming = null
         }
-    }
-
-    /**
-     * Прибирает тяжёлые ролики, на которые никто не ссылается: ни очередь, ни
-     * экран. Делается перед новой закачкой — место нужно именно тогда.
-     */
-    private suspend fun sweepHeavy() {
-        val referenced = queueLock.withLock { queue.map { originalKey(it) }.toMutableSet() }
-        showingHeavyPath?.let { referenced += originalKey(it) }
-        heavyCache.keys().filter { it !in referenced }.forEach { heavyCache.remove(it) }
     }
 
     /**
@@ -546,12 +545,8 @@ class FrameEngine(
     private fun deliveryPlan(item: MediaItem): PlannedDelivery = when {
         item.kind == MediaKind.PHOTO -> PlannedDelivery.Cached
         item.sizeBytes <= policy().itemThresholdBytes -> PlannedDelivery.Cached
-        else -> PlannedDelivery.Heavy
+        else -> PlannedDelivery.Stream
     }
-
-    /** Тяжёлый ролик, который ещё не приехал: в очереди стоит, на экран не идёт. */
-    private fun isPendingHeavy(item: MediaItem): Boolean =
-        deliveryPlan(item) == PlannedDelivery.Heavy && !heavyReady(item)
 
     private suspend fun ensureCached(item: MediaItem): File =
         if (item.kind == MediaKind.PHOTO) {
@@ -566,7 +561,7 @@ class FrameEngine(
             fetcher.ensure(CacheKey.forOriginal(item), source.downloadUrl(item))
         }
 
-    private enum class PlannedDelivery { Cached, Heavy }
+    private enum class PlannedDelivery { Cached, Stream }
 
     /** Ближайшие кадры — их и предстоит подгрузить заранее. */
     suspend fun upcoming(): List<MediaItem> = withContext(Dispatchers.Default) {
@@ -598,11 +593,13 @@ class FrameEngine(
                 iterator.remove()
                 continue
             }
-            // Тяжёлый ролик ждёт своей закачки на месте, показ идёт мимо
-            // него: как приедет — выйдет на экран.
-            if (isPendingHeavy(entry.item)) continue
+            // Ролик потоком ждёт подкачки на месте, показ идёт мимо него:
+            // как начало приедет — выйдет на экран.
+            if (isPendingStream(entry.item)) continue
             iterator.remove()
             library.markShown(path)
+            // Подкачанный пошёл на экран — буфер свободен под следующего.
+            synchronized(primeLock) { if (primedWaiting == path) primedWaiting = null }
             refill()
             return entry.item
         }
@@ -617,22 +614,15 @@ class FrameEngine(
         }
 
         val queued = queue.toMutableSet()
-        var pendingHeavy = queue.count { path -> entryOf(path)?.let { isPendingHeavy(it.item) } == true }
+        var pending = queue.count { path -> entryOf(path)?.let { isPendingStream(it.item) } == true }
         while (queue.size < policy().prefetchCount) {
             val next = playlist.pick(candidates, queued, clock()) ?: break
             queued += next.item.path
-            if (isPendingHeavy(next.item)) {
-                // В очереди держим не больше одного нескачанного: два
-                // гигабайта одновременно и место, и канал делят плохо.
-                if (pendingHeavy >= 1) continue
-                if (!heavyFits(next.item)) {
-                    synchronized(failures) {
-                        failures[next.item.path] =
-                            "не хватает места: нужно ${next.item.sizeBytes / 1_048_576} МБ"
-                    }
-                    continue
-                }
-                pendingHeavy++
+            if (isPendingStream(next.item)) {
+                // В очереди держим не больше одного неподкачанного: буфер
+                // один, и второй ролик вытеснил бы из него первый.
+                if (pending >= 1) continue
+                pending++
             }
             queue.addLast(next.item.path)
         }
@@ -644,22 +634,52 @@ class FrameEngine(
     val failed: Map<String, String> get() = synchronized(failures) { failures.toMap() }
 
     private companion object {
-        /** Столько оставляем свободным: раздел, забитый под ноль, роняет всё подряд. */
-        const val HEAVY_SPACE_RESERVE_BYTES = 300L * 1024 * 1024
+        /**
+         * Столько буфера оставляем под сам показ: пока ролик идёт, плеер
+         * дописывает в буфер продолжение, и ему нужно место, иначе вытеснится
+         * ещё не сыгранное начало.
+         */
+        const val PRIME_HEADROOM_BYTES = 64L * 1024 * 1024
     }
 }
 
-/** Ход закачки тяжёлого ролика — это показывает диагностика. */
-class HeavyDownload(val item: MediaItem, val startedAtMillis: Long) {
+/**
+ * Подкачка начала ролика в буфер потока.
+ *
+ * Снаружи, потому что буфер принадлежит плееру: он же и читает из него при
+ * показе. Движок знает только, сколько уже лежит и сколько хочется.
+ */
+interface StreamPrimer {
+    /** Сколько байт от начала ролика уже лежит подряд, не больше [limit]. */
+    fun primedBytes(key: String, limit: Long): Long
+
+    /** Сколько всего занимает буфер. */
+    fun usedBytes(): Long
+
+    /** Кладёт первые [bytes] байт; [onProgress] получает, сколько уже лежит. */
+    suspend fun prime(key: String, url: String, bytes: Long, onProgress: (Long) -> Unit)
+
+    companion object {
+        /** Подкачки нет: всё идёт потоком как есть. */
+        val NONE = object : StreamPrimer {
+            override fun primedBytes(key: String, limit: Long) = 0L
+            override fun usedBytes() = 0L
+            override suspend fun prime(key: String, url: String, bytes: Long, onProgress: (Long) -> Unit) = Unit
+        }
+    }
+}
+
+/** Ход подкачки — это показывает диагностика. */
+class PrimeState(val item: MediaItem, val wantedBytes: Long, val startedAtMillis: Long) {
     @Volatile
     var doneBytes: Long = 0L
 }
 
-/** Что случилось с закачкой тяжёлого ролика. */
-sealed interface HeavyEvent {
-    data class Started(val item: MediaItem) : HeavyEvent
-    data class Finished(val item: MediaItem, val tookMillis: Long, val bytes: Long) : HeavyEvent
-    data class Failed(val item: MediaItem, val reason: String) : HeavyEvent
+/** Что случилось с подкачкой. */
+sealed interface PrimeEvent {
+    data class Started(val item: MediaItem, val bytes: Long) : PrimeEvent
+    data class Finished(val item: MediaItem, val tookMillis: Long, val bytes: Long) : PrimeEvent
+    data class Failed(val item: MediaItem, val reason: String) : PrimeEvent
 }
 
 /** Что известно о папке. */
@@ -675,14 +695,14 @@ data class IndexState(
     val tooSmall: Int = 0,
 )
 
-/** Занятость кэша; тяжёлые ролики лежат отдельно и в бюджет не входят. */
+/** Занятость кэша; буфер потока лежит отдельно и в бюджет не входит. */
 data class CacheState(
     val usedBytes: Long,
     val budgetBytes: Long,
     val files: Int,
-    val heavyBytes: Long = 0L,
-    val heavyFiles: Int = 0,
+    val primedBytes: Long = 0L,
+    val primeBudgetBytes: Long = 0L,
 )
 
-/** Что сделала подготовка: сколько положено в кэш, сколько тяжёлых ждёт закачки, сколько вытеснено. */
-data class PrefetchOutcome(val fetched: Int, val heavy: Int, val evicted: Int)
+/** Что сделала подготовка: сколько положено в кэш, сколько оставлено потоку, сколько вытеснено. */
+data class PrefetchOutcome(val fetched: Int, val streamed: Int, val evicted: Int)

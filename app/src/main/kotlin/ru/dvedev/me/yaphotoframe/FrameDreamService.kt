@@ -20,7 +20,7 @@ import ru.dvedev.me.yaphotoframe.cache.MediaFetcher
 import ru.dvedev.me.yaphotoframe.diag.Diary
 import ru.dvedev.me.yaphotoframe.diag.ShowStats
 import ru.dvedev.me.yaphotoframe.engine.FrameEngine
-import ru.dvedev.me.yaphotoframe.engine.HeavyEvent
+import ru.dvedev.me.yaphotoframe.engine.PrimeEvent
 import ru.dvedev.me.yaphotoframe.engine.PlaylistTuning
 import ru.dvedev.me.yaphotoframe.engine.PrefetchOutcome
 import ru.dvedev.me.yaphotoframe.library.FolderIndexStore
@@ -36,6 +36,8 @@ import ru.dvedev.me.yaphotoframe.slideshow.PreparedPhoto
 import ru.dvedev.me.yaphotoframe.slideshow.PreparedVideo
 import ru.dvedev.me.yaphotoframe.slideshow.Slideshow
 import ru.dvedev.me.yaphotoframe.tuner.TunerServer
+import ru.dvedev.me.yaphotoframe.video.ExoStreamPrimer
+import ru.dvedev.me.yaphotoframe.video.StreamCache
 import ru.dvedev.me.yaphotoframe.video.VideoPlayback
 import ru.dvedev.me.yaphotoframe.ui.FramePlacement
 import ru.dvedev.me.yaphotoframe.ui.GuideView
@@ -263,7 +265,7 @@ class FrameDreamService : DreamService() {
         engine = null
         File(filesDir, LIBRARY_FILE).delete()
         File(cacheDir, CACHE_DIRECTORY).deleteRecursively()
-        File(cacheDir, HEAVY_DIRECTORY).deleteRecursively()
+        StreamCache.clear(this)
         slideshowView?.clear()
         startSlideshow()
     }
@@ -294,12 +296,14 @@ class FrameDreamService : DreamService() {
                 directory = File(cacheDir, CACHE_DIRECTORY),
                 budgetBytes = { store.current.cacheBudgetBytes },
             )
-            // Тяжёлым роликам бюджет не писан: их прибирает сам движок, когда
-            // они показаны, а держит не больше двух.
-            val heavyCache = MediaCache(
-                directory = File(cacheDir, HEAVY_DIRECTORY),
-                budgetBytes = { Long.MAX_VALUE },
-            )
+            // Буфер потока пересоздаётся под текущий объём: плеер и подкачка
+            // делят один и тот же.
+            val streamCache = withContext(Dispatchers.IO) {
+                // Одна из прежних сборок складывала тяжёлые ролики целиком
+                // сюда — на телевизоре это гигабайты, прибираем.
+                File(cacheDir, "heavy").deleteRecursively()
+                StreamCache.open(this@FrameDreamService, store.current.streamBufferBytes)
+            }
             // Движок при создании читает индекс с диска — на большой библиотеке
             // это четыре мегабайта JSON и почти три секунды. Делать это на
             // главном потоке значило бы замереть на старте заставки.
@@ -329,9 +333,9 @@ class FrameDreamService : DreamService() {
                 folderStore = FolderIndexStore(File(filesDir, FOLDERS_FILE)),
                 cache = cache,
                 fetcher = MediaFetcher(Http.client, cache),
-                heavyCache = heavyCache,
-                heavyFetcher = MediaFetcher(Http.client, heavyCache),
-                onHeavy = ::reportHeavy,
+                primer = ExoStreamPrimer(streamCache),
+                primeBudgetBytes = { store.current.streamBufferBytes },
+                onPrime = ::reportPrime,
                 policy = { store.current.cachePolicy() },
                 includeVideo = { store.current.showVideo },
                 minPhotoLongSide = ::minPhotoLongSide,
@@ -588,8 +592,11 @@ class FrameDreamService : DreamService() {
                 togglePause(); true
             }
 
-            event.keyCode == KeyEvent.KEYCODE_DPAD_UP ||
-                event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN -> {
+            event.keyCode == KeyEvent.KEYCODE_DPAD_UP -> {
+                toggleSound(); true
+            }
+
+            event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN -> {
                 if (guideOverlay == null) flashGuide() else hideGuideOverlay()
                 true
             }
@@ -615,6 +622,25 @@ class FrameDreamService : DreamService() {
     private val autoResume = Runnable {
         Diary.note("пауза снята по времени")
         setPaused(false)
+    }
+
+    /**
+     * Звук в роликах — с пульта, кнопкой ↑.
+     *
+     * Настройка та же, что на странице, и запоминается: включили вечером —
+     * утром ролики по-прежнему со звуком. Действует и на тот, что идёт сейчас.
+     */
+    private fun toggleSound() {
+        val enabled = !store.current.videoSoundEnabled
+        store.update { it.copy(videoSoundEnabled = enabled) }
+        playback.setSoundEnabled(enabled)
+        overlay(showingSound = enabled)
+        Diary.note(if (enabled) "звук в роликах включён с пульта" else "звук в роликах выключен с пульта")
+    }
+
+    /** Значок звука виден, только пока идёт ролик и звук включён. */
+    private fun overlay(showingSound: Boolean) {
+        slideshowView?.setSound(showingVideo && showingSound)
     }
 
     private fun setPaused(value: Boolean) {
@@ -657,6 +683,7 @@ class FrameDreamService : DreamService() {
         )
 
         showingVideo = prepared is PreparedVideo
+        if (!showingVideo) overlay(showingSound = false)
         // Плеер здесь не останавливаем: пока слой с роликом виден, он держит на
         // поверхности последний кадр. Отпустим его, когда слой уйдёт.
         if (prepared is PreparedVideo) startPlayback(prepared)
@@ -686,6 +713,7 @@ class FrameDreamService : DreamService() {
         }
         Diary.note("ролик ${prepared.item.name}: $source, ${prepared.item.sizeBytes / 1_048_576} МБ")
         var stalls = 0
+        overlay(showingSound = store.current.videoSoundEnabled)
         if (paused) {
             // Долистали до ролика на паузе — пусть и он стоит, пока не снимут.
             slideshowView?.post { playback.setPaused(true) }
@@ -714,17 +742,12 @@ class FrameDreamService : DreamService() {
                 if (seconds > 0) Diary.note("ролик ${prepared.item.name} пошёл, ${formatSeconds(seconds)}")
             },
             onStalled = {
+                // Пропускать ролик из-за заиканий не стали: владелец решил,
+                // что дёрганый ролик лучше пропущенного. В дневник — первые
+                // несколько остановок, дальше это уже не новость.
                 stalls++
-                if (stalls < STALLS_TO_SKIP) {
+                if (stalls <= STALLS_TO_NOTE) {
                     Diary.note("ролик ${prepared.item.name} встал на подкачку ($stalls)")
-                } else if (stalls == STALLS_TO_SKIP) {
-                    // Сеть не тянет битрейт: заикание раз за разом хуже, чем
-                    // пропуск. Пометка видна на странице, чтобы было понятно,
-                    // почему ролик не показался.
-                    val reason = "заикается при потоковом воспроизведении, пропущен"
-                    Diary.problem("ролик ${prepared.item.name} $reason")
-                    engine?.noteFailure(prepared.item.path, reason)
-                    slideshow?.page(1)
                 }
             },
         )
@@ -828,13 +851,13 @@ class FrameDreamService : DreamService() {
             append("\"usedBytes\":").append(cache?.usedBytes ?: 0).append(',')
             append("\"budgetBytes\":").append(cache?.budgetBytes ?: 0).append(',')
             append("\"files\":").append(cache?.files ?: 0).append(',')
-            append("\"heavyBytes\":").append(cache?.heavyBytes ?: 0).append(',')
-            append("\"heavyFiles\":").append(cache?.heavyFiles ?: 0).append(',')
-            // Что качается заранее: гигабайтный ролик едет минуты, и без
-            // счётчика непонятно, почему он всё не показывается.
-            append("\"download\":").append(
-                engine?.heavyState()?.let {
-                    "{\"name\":\"${escape(it.item.name)}\",\"sizeBytes\":${it.item.sizeBytes}," +
+            append("\"primedBytes\":").append(cache?.primedBytes ?: 0).append(',')
+            append("\"primeBudgetBytes\":").append(cache?.primeBudgetBytes ?: 0).append(',')
+            // Что подкачивается: сотни мегабайт едут десятки секунд, и без
+            // счётчика непонятно, почему ролик всё не показывается.
+            append("\"priming\":").append(
+                engine?.primeState()?.let {
+                    "{\"name\":\"${escape(it.item.name)}\",\"wantedBytes\":${it.wantedBytes}," +
                         "\"doneBytes\":${it.doneBytes},\"startedAt\":${it.startedAtMillis}}"
                 } ?: "null",
             )
@@ -868,27 +891,30 @@ class FrameDreamService : DreamService() {
     private fun reportPrefetch(outcome: PrefetchOutcome) {
         val state = engine?.cacheState() ?: return
         Diary.note(
-            "подготовка: положено ${outcome.fetched}, тяжёлых ${outcome.heavy}, " +
+            "подготовка: положено ${outcome.fetched}, потоком ${outcome.streamed}, " +
                 "вытеснено ${outcome.evicted}; кэш ${state.usedBytes / 1024 / 1024} МБ " +
                 "в ${state.files} файлах из ${state.budgetBytes / 1024 / 1024} МБ",
         )
     }
 
-    /** Закачка тяжёлого ролика — в дневник: по ней видно и канал, и почему ролик ждёт. */
-    private fun reportHeavy(event: HeavyEvent) {
+    /** Подкачка — в дневник: по ней видно и канал, и почему ролик ждёт. */
+    private fun reportPrime(event: PrimeEvent) {
         when (event) {
-            is HeavyEvent.Started ->
-                Diary.note("ролик ${event.item.name}: качаю заранее, ${event.item.sizeBytes / 1_048_576} МБ")
-            is HeavyEvent.Finished -> {
+            is PrimeEvent.Started ->
+                Diary.note(
+                    "ролик ${event.item.name}: подкачиваю заранее ${event.bytes / 1_048_576} МБ " +
+                        "из ${event.item.sizeBytes / 1_048_576}",
+                )
+            is PrimeEvent.Finished -> {
                 val seconds = maxOf(1L, event.tookMillis / 1000)
                 val speed = event.bytes / 1_048_576.0 / seconds
                 Diary.note(
-                    "ролик ${event.item.name} скачан за ${formatSeconds(seconds)}, " +
+                    "ролик ${event.item.name} подкачан за ${formatSeconds(seconds)}, " +
                         "${"%.1f".format(speed)} МБ/с",
                 )
             }
-            is HeavyEvent.Failed ->
-                Diary.problem("ролик ${event.item.name} не скачался: ${event.reason}")
+            is PrimeEvent.Failed ->
+                Diary.problem("ролик ${event.item.name} не подкачался, пойдёт потоком как есть: ${event.reason}")
         }
     }
 
@@ -909,12 +935,11 @@ class FrameDreamService : DreamService() {
         const val FOLDERS_FILE = "folders.json"
         const val STATS_FILE = "show-stats.csv"
         const val CACHE_DIRECTORY = "media"
-        const val HEAVY_DIRECTORY = "heavy"
         const val HISTORY_DEPTH = 10
         const val SKIP_NOTE_INTERVAL_MILLIS = 60_000L
 
         /** Столько остановок на подкачку — и ролик пропускается. */
-        const val STALLS_TO_SKIP = 3
+        const val STALLS_TO_NOTE = 3
         /** Сколько держать подсказку, вызванную с пульта. */
         const val GUIDE_FLASH_MILLIS = 10_000L
         /** «Без ограничения» для ролика: сутки, которых не бывает. */

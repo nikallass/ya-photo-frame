@@ -216,7 +216,7 @@
   <div class="sheet">
     <h2>Сохраните страницу на телефон</h2>
     <p>Иначе адрес придётся искать заново — он привязан к телевизору и нигде больше
-      не записан. На заставке его можно вспомнить кнопками ↑ или ↓ на пульте.</p>
+      не записан. На заставке его можно вспомнить кнопкой ↓ на пульте.</p>
     <div class="os" id="os-ios">
       <b>iPhone, Safari</b>
       <p>Кнопка «Поделиться» внизу → <b>«На экран Домой»</b> → «Добавить».
@@ -262,9 +262,13 @@ const FIELDS = [
     min: 0, max: 120, step: 1, get: v => Math.round(v / 60000), set: s => s * 60000,
     show: v => v ? Math.round(v / 60000) + ' мин' : 'пока не снимут' },
 
-  { key: 'videoMaxSizeBytes', name: 'Ролик не тяжелее', note: 'что тяжелее — не показывается вовсе; 0 — без ограничения, лишь бы хватило места на телевизоре',
+  { key: 'videoMaxSizeBytes', name: 'Ролик не тяжелее', note: 'что тяжелее — не показывается вовсе: тяжёлый поток заикается, а пережатых вариантов Диск не отдаёт; 0 — без ограничения',
     min: 0, max: 4096, step: 64, get: v => Math.round(v / 1048576), set: s => s * 1048576,
     show: v => !v ? 'без ограничения' : v >= 1073741824 ? (v / 1073741824).toFixed(1) + ' ГБ' : Math.round(v / 1048576) + ' МБ' },
+
+  { key: 'streamBufferBytes', name: 'Подкачка потока', note: 'начало тяжёлого ролика подкачивается заранее в буфер этого объёма, и ролик выходит на экран, когда оно на месте; буфер общий и больше не растёт; 0 — не подкачивать',
+    min: 0, max: 4096, step: 64, get: v => Math.round(v / 1048576), set: s => s * 1048576,
+    show: v => !v ? 'нет' : v >= 1073741824 ? (v / 1073741824).toFixed(1) + ' ГБ' : Math.round(v / 1048576) + ' МБ' },
 
   { key: 'videoMaxDurationMillis', name: 'Ролик не дольше', note: '0 — до конца, сколько бы ни длился',
     min: 0, max: 1800, step: 10,
@@ -336,7 +340,7 @@ const FIELDS = [
     get: v => Math.round(v / 1048576), set: s => s * 1048576,
     show: v => v >= 1073741824 ? (v / 1073741824).toFixed(1) + ' ГБ' : Math.round(v / 1048576) + ' МБ' },
 
-  { key: 'cacheItemThresholdBytes', name: 'Порог тяжёлого ролика', note: 'что легче — ложится в общий кэш; что тяжелее — качается отдельно, по одному, и показывается, когда скачан целиком',
+  { key: 'cacheItemThresholdBytes', name: 'Порог кэширования', note: 'что легче — ложится в кэш целиком; что тяжелее — идёт потоком с подкачкой заранее',
     min: 1, max: 2048, step: 1,
     get: v => Math.round(v / 1048576), set: s => s * 1048576,
     show: v => Math.round(v / 1048576) + ' МБ' },
@@ -811,12 +815,12 @@ async function loadState() {
       kv('нечем показать', i.unshowable) + kv('мельче порога', i.tooSmall) + kv('показано хоть раз', i.shown) +
       kv('последний обход', i.syncedAt ? new Date(i.syncedAt).toLocaleString('ru-RU') : 'не было') +
       (d.indexing ? kv('идёт обход', d.indexing.files + ' файлов в ' + d.indexing.folders + ' папках…') : '');
-    const dl = c.download;
+    const pr = c.priming;
     document.getElementById('cache').innerHTML =
       kv('занято', bytes(c.usedBytes)) + kv('из', bytes(c.budgetBytes)) + kv('файлов', c.files) +
-      (c.heavyFiles ? kv('тяжёлых роликов отдельно', c.heavyFiles + ' на ' + bytes(c.heavyBytes)) : '') +
-      (dl ? kv('качается заранее', dl.name + ' — ' + bytes(dl.doneBytes) + ' из ' + bytes(dl.sizeBytes) +
-        (dl.sizeBytes ? ' (' + Math.round(dl.doneBytes / dl.sizeBytes * 100) + ' %)' : '')) : '');
+      (c.primeBudgetBytes ? kv('буфер потока', bytes(c.primedBytes) + ' из ' + bytes(c.primeBudgetBytes)) : '') +
+      (pr ? kv('подкачивается заранее', pr.name + ' — ' + bytes(pr.doneBytes) + ' из ' + bytes(pr.wantedBytes) +
+        (pr.wantedBytes ? ' (' + Math.round(pr.doneBytes / pr.wantedBytes * 100) + ' %)' : '')) : '');
     document.getElementById('cachebar').style.width =
       Math.min(100, c.budgetBytes ? c.usedBytes / c.budgetBytes * 100 : 0) + '%';
 

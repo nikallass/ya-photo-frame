@@ -199,15 +199,18 @@ class FrameLayer(context: Context) : FrameLayout(context) {
             // Пока слой лежит в аппаратном буфере (идёт растворение), двигаем и
             // растим слой целиком: это бесплатно, буфер не перерисовывается.
             // Фон при этом уезжает на те же пиксели — на размытом это не видно.
-            // Потом движение переносится на обойму со снимком, и фон стоит.
+            // Потом движение переносится на обойму со снимком, а слой остаётся
+            // там, где его застал конец растворения: возврат на место был бы
+            // виден как рывок фона, и на мелких снимках его замечали.
             if (layerType == LAYER_TYPE_HARDWARE) {
                 pairHolder.translationX = 0f; pairHolder.translationY = 0f
                 pairHolder.scaleX = 1f; pairHolder.scaleY = 1f
                 translationX = x; translationY = y; scaleX = scale; scaleY = scale
             } else {
-                translationX = 0f; translationY = 0f; scaleX = 1f; scaleY = 1f
-                pairHolder.translationX = x; pairHolder.translationY = y
-                pairHolder.scaleX = scale; pairHolder.scaleY = scale
+                pairHolder.translationX = x - translationX
+                pairHolder.translationY = y - translationY
+                pairHolder.scaleX = scale / scaleX
+                pairHolder.scaleY = scale / scaleY
             }
             if (progress < 1f || zoomProgress < 1f) {
                 driftHandler.postDelayed(this, DRIFT_TICK_MILLIS)

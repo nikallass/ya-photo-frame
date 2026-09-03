@@ -86,6 +86,7 @@ class SettingsStore(context: Context) {
                 prefs.getLong(KEY_VIDEO_MAX, defaults.videoMaxDurationMillis),
             videoSoundEnabled = prefs.getBoolean(KEY_VIDEO_SOUND, defaults.videoSoundEnabled),
             videoMaxSizeBytes = prefs.getLong(KEY_VIDEO_MAX_SIZE, defaults.videoMaxSizeBytes),
+            streamBufferBytes = prefs.getLong(KEY_STREAM_BUFFER, defaults.streamBufferBytes),
             pairPortraits = prefs.getBoolean(KEY_PAIRS, defaults.pairPortraits),
             freshnessWindowDays = prefs.getInt(KEY_FRESHNESS, defaults.freshnessWindowDays),
             showClock = prefs.getBoolean(KEY_CLOCK, defaults.showClock),
@@ -130,6 +131,7 @@ class SettingsStore(context: Context) {
             .putLong(KEY_VIDEO_MAX, value.videoMaxDurationMillis)
             .putBoolean(KEY_VIDEO_SOUND, value.videoSoundEnabled)
             .putLong(KEY_VIDEO_MAX_SIZE, value.videoMaxSizeBytes)
+            .putLong(KEY_STREAM_BUFFER, value.streamBufferBytes)
             .putBoolean(KEY_PAIRS, value.pairPortraits)
             .putInt(KEY_FRESHNESS, value.freshnessWindowDays)
             .putBoolean(KEY_CLOCK, value.showClock)
@@ -164,6 +166,7 @@ class SettingsStore(context: Context) {
         const val KEY_VIDEO_MAX = "video_max_duration_millis"
         const val KEY_VIDEO_SOUND = "video_sound_enabled"
         const val KEY_VIDEO_MAX_SIZE = "video_max_size_bytes"
+        const val KEY_STREAM_BUFFER = "stream_buffer_bytes"
         const val KEY_PAIRS = "pair_portraits"
         const val KEY_FRESHNESS = "freshness_window_days"
         const val KEY_MIN_PHOTO = "min_photo_fraction"
@@ -217,6 +220,7 @@ fun FrameSettings.sanitized(): FrameSettings {
         videoMaxDurationMillis = videoMaxDurationMillis.coerceIn(0L, 60L * 60 * 1000),
         videoSoundEnabled = videoSoundEnabled,
         videoMaxSizeBytes = videoMaxSizeBytes.coerceIn(0L, 8L * 1024 * 1024 * 1024),
+        streamBufferBytes = streamBufferBytes.coerceIn(0L, 4L * 1024 * 1024 * 1024),
         pairPortraits = pairPortraits,
         freshnessWindowDays = freshnessWindowDays.coerceIn(1, 3650),
         showClock = showClock,

@@ -10,6 +10,7 @@ import androidx.media3.common.VideoSize
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.LoadControl
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import ru.dvedev.me.yaphotoframe.cache.Delivery
 
 /**
@@ -27,6 +28,11 @@ class VideoPlayback(private val context: Context) {
 
     fun setPaused(paused: Boolean) {
         player?.playWhenReady = !paused
+    }
+
+    /** Звук — прямо у идущего ролика: настройку переключают с пульта посреди показа. */
+    fun setSoundEnabled(enabled: Boolean) {
+        player?.volume = if (enabled) 1f else 0f
     }
 
     fun play(
@@ -88,7 +94,17 @@ class VideoPlayback(private val context: Context) {
                     onFailed(error)
                 }
             })
-            setMediaItem(MediaItem.fromUri(uri))
+            val cache = (delivery as? Delivery.Streamed)?.cacheKey?.let { StreamCache.current() }
+            if (cache != null && delivery is Delivery.Streamed) {
+                // Поток — через буфер: начало ролика туда подкачано заранее, а
+                // продолжение ложится по ходу и пригодится при листании назад.
+                val item = MediaItem.Builder().setUri(uri).setCustomCacheKey(delivery.cacheKey).build()
+                setMediaSource(
+                    ProgressiveMediaSource.Factory(StreamCache.dataSourceFactory(cache)).createMediaSource(item),
+                )
+            } else {
+                setMediaItem(MediaItem.fromUri(uri))
+            }
             prepare()
             playWhenReady = true
         }
