@@ -20,8 +20,8 @@ data class FrameSettings(
      */
     val folderUrl: String = Defaults.PUBLIC_FOLDER_URL,
 
-    /** Сколько висит один кадр. Минута — то, что просил владелец; диапазон от 5 с до часа. */
-    val showDurationMillis: Long = 60_000L,
+    /** Сколько висит один кадр. Двадцать секунд — как обжилось на телевизоре владельца; от 5 с до часа. */
+    val showDurationMillis: Long = 20_000L,
 
     /** Длительность перехода между кадрами. */
     val crossfadeMillis: Long = 1_500L,
@@ -175,10 +175,10 @@ data class FrameSettings(
     val pauseAutoResumeMillis: Long = 10L * 60 * 1000,
 
     /** Показывать ли часы поверх кадра. */
-    val showClock: Boolean = false,
+    val showClock: Boolean = true,
 
     /** Показывать ли дату съёмки поверх кадра. */
-    val showDate: Boolean = false,
+    val showDate: Boolean = true,
 
     /** На сколько кадров вперёд смотреть и что подгружать заранее. */
     val prefetchCount: Int = CachePolicy.DEFAULT_PREFETCH_COUNT,

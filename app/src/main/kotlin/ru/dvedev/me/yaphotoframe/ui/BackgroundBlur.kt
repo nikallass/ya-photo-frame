@@ -21,7 +21,7 @@ import kotlin.math.roundToInt
 object BackgroundBlur {
 
     /** До скольких пикселей по длинной стороне ужимать. Меньше — размытее. */
-    const val DEFAULT_SAMPLE_LONG_SIDE = 8
+    const val DEFAULT_SAMPLE_LONG_SIDE = 32
 
     /** До какого размера разворачивать обратно перед выводом на экран. */
     private const val INTERMEDIATE_LONG_SIDE = 128
