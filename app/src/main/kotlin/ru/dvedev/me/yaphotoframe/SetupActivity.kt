@@ -105,6 +105,7 @@ class SetupActivity : Activity() {
         buildHeader()
         buildRows()
         buildButtons()
+        container.addView(label("Фоторамка ${BuildConfig.VERSION_NAME}", 12f, MUTED))
         refresh()
     }
 
@@ -132,6 +133,7 @@ class SetupActivity : Activity() {
                     showingDemo = false,
                     donateUrl = Defaults.DONATE_URL,
                     assignStep = true,
+                    version = BuildConfig.VERSION_NAME,
                     // На этом экране подсказка делит место с настройками, но
                     // целиком должна влезать в экран без прокрутки.
                     maxHeightPx = resources.displayMetrics.heightPixels - PADDING * 2,

@@ -222,6 +222,7 @@ class FrameDreamService : DreamService() {
 
     private fun buildGuide() = GuideView(
         context = this,
+        version = BuildConfig.VERSION_NAME,
         addresses = if (store.current.tunerEnabled) {
             TunerServer(store, assets).addresses()
         } else {

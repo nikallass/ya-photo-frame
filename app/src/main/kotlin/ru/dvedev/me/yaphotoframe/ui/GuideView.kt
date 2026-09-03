@@ -33,6 +33,8 @@ class GuideView(
     assignStep: Boolean = false,
     /** Предел высоты, когда родитель его не задаёт (например, внутри прокрутки). */
     private val maxHeightPx: Int = 0,
+    /** Версия сборки — мелко под кодом, чтобы было понятно, что стоит. */
+    private val version: String? = null,
 ) : LinearLayout(context) {
 
     /** Во сколько раз текст ужат, чтобы влезть; единица — как задумано. */
@@ -167,6 +169,17 @@ class GuideView(
             }
         }
 
+        version?.let {
+            column.addView(
+                TextView(context).apply {
+                    text = "версия $it"
+                    textSize = 12f
+                    setTextColor(MUTED)
+                    gravity = Gravity.END
+                    setPadding(0, GAP * 2, 0, 0)
+                }
+            )
+        }
         if (column.childCount == 0) return
         addView(
             column,

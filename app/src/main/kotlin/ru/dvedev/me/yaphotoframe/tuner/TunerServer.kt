@@ -2,6 +2,12 @@ package ru.dvedev.me.yaphotoframe.tuner
 
 import android.content.res.AssetManager
 import android.util.Log
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import ru.dvedev.me.yaphotoframe.BuildConfig
 import ru.dvedev.me.yaphotoframe.settings.SettingsStore
 import ru.dvedev.me.yaphotoframe.ui.FrameSettings
 import java.io.BufferedInputStream
@@ -221,6 +227,17 @@ class TunerServer(
                 respond(client, "200 OK", "application/json; charset=utf-8", "{\"ok\":true}")
             }
 
+            // Перенос настроек на другой телевизор: страница отдаёт тот же JSON,
+            // что и /api/settings, а здесь он принимается назад целиком.
+            method == "POST" && path == "/api/import" -> {
+                val problem = importJson(body)
+                if (problem == null) {
+                    respond(client, "200 OK", "application/json; charset=utf-8", json(store.current))
+                } else {
+                    respond(client, "400 Bad Request", "text/plain; charset=utf-8", problem)
+                }
+            }
+
             method == "POST" && path == "/api/reset" -> {
                 store.reset()
                 respond(client, "200 OK", "application/json; charset=utf-8", json(store.current))
@@ -231,6 +248,27 @@ class TunerServer(
 
             else -> respond(client, "404 Not Found", "text/plain; charset=utf-8", "нет такой страницы")
         }
+    }
+
+    /** Разбирает JSON настроек в тот же вид, что присылает форма, и применяет. Null — успех. */
+    private fun importJson(body: String): String? {
+        val fields = try {
+            Json.parseToJsonElement(body).jsonObject
+        } catch (e: Exception) {
+            return "это не JSON настроек"
+        }
+        val pairs = fields.mapNotNull { (key, value) ->
+            if (key == "host" || key == "version") return@mapNotNull null
+            val raw = when (value) {
+                is JsonArray -> value.joinToString("\n") { (it as? JsonPrimitive)?.content ?: "" }
+                is JsonPrimitive -> value.content
+                else -> return@mapNotNull null
+            }
+            key + "=" + java.net.URLEncoder.encode(raw, StandardCharsets.UTF_8.name())
+        }
+        if (pairs.none { it.startsWith("folderUrl=") }) return "в файле нет настроек рамки"
+        apply(pairs.joinToString("&"))
+        return null
     }
 
     private fun apply(body: String) {
@@ -302,6 +340,7 @@ class TunerServer(
     private fun json(settings: FrameSettings): String = buildString {
         append('{')
         append("\"host\":\"").append(host).append("\",")
+        append("\"version\":\"").append(BuildConfig.VERSION_NAME).append("\",")
         append("\"folderUrl\":\"").append(settings.folderUrl.replace("\"", "")).append("\",")
         append("\"showDurationMillis\":").append(settings.showDurationMillis).append(',')
         append("\"crossfadeMillis\":").append(settings.crossfadeMillis).append(',')

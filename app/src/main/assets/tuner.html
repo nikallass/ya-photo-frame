@@ -49,6 +49,9 @@
   .banner small { display: block; font-weight: 400; font-size: 13px; margin-top: 4px; opacity: .85; }
   .banner[hidden] { display: none; }
   .statusline { font-size: 16px; color: var(--text); }
+  .pair { display: flex; gap: 8px; }
+  .pair button { flex: 1; }
+  .foot { text-align: center; color: var(--muted); font-size: 12px; margin: 18px 0 0; opacity: .7; }
   .statusline.busy { color: var(--accent); }
   .right { display: flex; align-items: center; gap: 10px; }
   /* Не кнопка, а значок: рамка и фон рядом с каждым значением утяжеляли страницу. */
@@ -131,6 +134,14 @@
   <div id="toggles"></div>
   <div id="rows"></div>
   <button id="reset">Вернуть значения по умолчанию</button>
+  <div class="hint" style="margin-top:18px">Перенос на другой телевизор: сохраните файл
+    настроек здесь, откройте страницу нового телевизора и загрузите его там — вместе с
+    папкой и отбором.</div>
+  <div class="pair">
+    <button id="export">Сохранить настройки</button>
+    <button id="import">Загрузить настройки</button>
+  </div>
+  <input type="file" id="importfile" accept=".json,application/json" hidden>
 </div>
 
 <div id="folders" hidden>
@@ -234,6 +245,7 @@
   </div>
 </div>
 
+<div class="foot" id="version"></div>
 <div id="status">загрузка…</div>
 
 <script>
@@ -297,7 +309,7 @@ const FIELDS = [
   { key: 'blurSampleLongSide', name: 'Размытие фона', note: 'меньше пикселей — сильнее размыто',
     min: 2, max: 64, step: 1, get: v => v, set: s => s, show: v => v + ' пикс.' },
 
-  { key: 'minPhotoFraction', name: 'Не мельче', note: 'снимки уже этой доли экрана пропускаются — превью, кропы; 0 — показывать всё',
+  { key: 'minPhotoFraction', name: 'Мельче порога', note: 'снимки уже этой доли экрана не показываются — превью, кропы; сколько таких, видно в «Состоянии»; 0 — показывать всё',
     min: 0, max: 60, step: 5, get: v => Math.round(v * 100), set: s => s / 100,
     show: v => v ? Math.round(v * 100) + ' % экрана' : 'показывать всё' },
 
@@ -413,6 +425,7 @@ loadDefaults();
 
 function render(data) {
   Object.assign(state, data);
+  if (data.version) document.getElementById('version').textContent = 'Фоторамка ' + data.version;
   const folder = document.getElementById('folder');
   if (document.activeElement !== folder) folder.value = state.folderUrl || '';
   for (const f of FIELDS) { inputs[f.key].value = f.get(state[f.key]); paint(f); }
@@ -462,6 +475,41 @@ document.getElementById('savefolder').addEventListener('click', async () => {
 });
 document.getElementById('assignok').addEventListener('click', () => {
   document.getElementById('assign').hidden = true;
+});
+
+// Файл настроек — тот же JSON, что отдаёт телевизор, без служебных полей.
+document.getElementById('export').addEventListener('click', async () => {
+  const data = await (await fetch('/api/settings')).json();
+  delete data.host; delete data.version;
+  const text = JSON.stringify(data, null, 2);
+  const file = new File([text], 'ya-photo-frame-settings.json', { type: 'application/json' });
+  // На телефоне удобнее «поделиться» — в файлы, заметки или мессенджер;
+  // где этого нет, файл просто скачивается.
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: 'Настройки фоторамки' }); return; }
+    catch (e) { if (e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(file); a.download = file.name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  status.textContent = 'файл настроек сохранён';
+});
+document.getElementById('import').addEventListener('click', () =>
+  document.getElementById('importfile').click());
+document.getElementById('importfile').addEventListener('change', async e => {
+  const f = e.target.files[0]; e.target.value = '';
+  if (!f) return;
+  const text = await f.text();
+  if (!confirm('Настройки этого телевизора будут заменены на настройки из файла, включая папку и отбор. Продолжить?')) return;
+  status.textContent = 'загружаю настройки…';
+  const res = await fetch('/api/import', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' }, body: text });
+  if (!res.ok) { status.textContent = 'не загрузилось: ' + await res.text(); return; }
+  render(await res.json());
+  selected = new Set(state.selectedFolders || []); appliedSelection = selectionKey();
+  status.textContent = 'настройки загружены' + (state.host === 'app' ? '' : ', рамка перечитывает папку');
+  if (state.host === 'app') document.getElementById('assign').hidden = false; else watchIndexing();
 });
 
 document.getElementById('reset').addEventListener('click', async () => {
