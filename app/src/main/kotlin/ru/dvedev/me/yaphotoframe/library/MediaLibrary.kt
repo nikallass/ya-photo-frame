@@ -90,7 +90,7 @@ class MediaLibrary(
         val removed = remembered.keys.count { it !in known }
         val added = entries.count { it.item.path !in remembered }
 
-        snapshot = LibrarySnapshot(syncedAtMillis = now, entries = entries)
+        synchronized(this) { snapshot = LibrarySnapshot(syncedAtMillis = now, entries = entries) }
         // Обход и так идёт в фоновом потоке, и его результат терять нельзя —
         // пишем сразу.
         store.save(snapshot)
@@ -106,6 +106,7 @@ class MediaLibrary(
     }
 
     /** Отмечает элемент показанным — это и есть память, переживающая перезагрузку. */
+    @Synchronized
     fun markShown(path: String) {
         val index = snapshot.entries.indexOfFirst { it.item.path == path }
         if (index < 0) return
@@ -117,6 +118,7 @@ class MediaLibrary(
     }
 
     /** Подменяет сведения об элементе, не трогая память о показах. */
+    @Synchronized
     fun updateItem(item: MediaItem) {
         val index = snapshot.entries.indexOfFirst { it.item.path == item.path }
         if (index < 0) return
@@ -128,6 +130,7 @@ class MediaLibrary(
     }
 
     /** Запоминает измеренный размер уменьшенной копии. */
+    @Synchronized
     fun recordPreviewSize(path: String, longSidePx: Int) {
         val index = snapshot.entries.indexOfFirst { it.item.path == path }
         if (index < 0) return

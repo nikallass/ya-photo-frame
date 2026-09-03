@@ -628,7 +628,9 @@ class FrameDreamService : DreamService() {
             append("\"budgetBytes\":").append(cache?.budgetBytes ?: 0).append(',')
             append("\"files\":").append(cache?.files ?: 0)
             append("},")
-            append("\"queue\":").append(jsonArray(engine?.upcoming()?.map { it.name }.orEmpty()))
+            append("\"queue\":").append(
+                jsonArray(engine?.let { kotlinx.coroutines.runBlocking { it.upcoming() } }?.map { it.name }.orEmpty()),
+            )
             append(',')
             append("\"hourly\":").append(stats.byHour().joinToString(",", "[", "]"))
             append(',')

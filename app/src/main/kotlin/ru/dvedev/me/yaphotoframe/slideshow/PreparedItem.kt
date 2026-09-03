@@ -121,7 +121,7 @@ class FramePreparer(
     private suspend fun backgroundFor(item: MediaItem): Bitmap {
         val micro = decode(previewFile(item, PreviewSize.MICRO))
         return try {
-            BackgroundBlur.render(micro, settings().blurSampleLongSide)
+            BackgroundBlur.render(micro, settings().blurSampleLongSide).also { it.prepareToDraw() }
         } finally {
             micro.recycle()
         }
@@ -144,6 +144,8 @@ class FramePreparer(
     }
 
     private fun decode(file: File): Bitmap =
-        BitmapFactory.decodeFile(file.path)
-            ?: throw IOException("не удалось декодировать ${file.name}")
+        (BitmapFactory.decodeFile(file.path)
+            ?: throw IOException("не удалось декодировать ${file.name}"))
+            // Загрузка в GPU идёт заранее, а не на первом кадре растворения.
+            .also { it.prepareToDraw() }
 }

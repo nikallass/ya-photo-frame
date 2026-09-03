@@ -95,27 +95,36 @@ class SlideshowView(context: Context) : FrameLayout(context) {
         overlay.apply(settings)
 
         val duration = if (animate) settings.crossfadeMillis else 0L
+        // Слой с несколькими детьми при смене прозрачности Android рисует в
+        // отдельный буфер на каждом кадре; `withLayer` рисует его один раз и
+        // дальше только накладывает. Без этого растворение на телевизоре
+        // дёргалось.
         incoming.animate().cancel()
         incoming.alpha = 0f
         incoming.animate()
             .alpha(1f)
             .setDuration(duration)
             .setInterpolator(AccelerateDecelerateInterpolator())
-            .withEndAction { if (outgoing !== incoming) release(outgoing) }
+            .withLayer()
+            .withEndAction {
+                if (outgoing !== incoming) release(outgoing)
+                // Ход стартует после растворения: пока слой в буфере, каждый
+                // сдвиг перерисовывал бы буфер целиком. За полторы секунды кадр
+                // всё равно сдвинулся бы на пиксель.
+                if (incoming is FrameLayer) {
+                    incoming.startDrift(settings.showDurationMillis)
+                }
+            }
             .start()
 
-        if (outgoing !== incoming) {
-            outgoing?.animate()?.cancel()
-            outgoing?.animate()
-                ?.alpha(0f)
-                ?.setDuration(duration)
-                ?.setInterpolator(AccelerateDecelerateInterpolator())
-                ?.start()
-        }
-
-        if (incoming is FrameLayer) {
-            incoming.startDrift(settings.showDurationMillis + settings.crossfadeMillis)
-        }
+        // Уходящий слой не гасим: он непрозрачный и лежит под приходящим, а
+        // смесь «верх·α + низ·(1−α)» получается одна и та же, гаснет низ или
+        // нет. Зато экран смешивает один слой, а не два, — на телевизоре это
+        // разница между дёрганым растворением и ровным.
+        outgoing?.animate()?.cancel()
+        // Ход уходящего слоя останавливаем: он под приходящим и его сдвиг
+        // всё равно не виден, а перерисовку вызывает.
+        if (outgoing !== incoming && outgoing is FrameLayer) outgoing.stopDrift()
     }
 
     /** Раздаёт новые настройки слоям: видимый обновится прямо сейчас. */

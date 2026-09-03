@@ -76,6 +76,14 @@ class FrameEngine(
     private val playlist = Playlist(random, tuning)
     private val queue = ArrayDeque<String>()
 
+    /**
+     * Очередь трогают из разных мест — показ, подготовка, обход, диагностика.
+     * Раньше всё это жило на главном потоке и было сериализовано само собой;
+     * выбор кадра на шести тысячах записей заставлял главный поток замирать
+     * ровно в начале растворения. Теперь он идёт в фоне, и очередь под замком.
+     */
+    private val queueLock = Mutex()
+
     @Volatile
     private var folderIndex: FolderIndex = folderStore.load()
 
@@ -104,9 +112,13 @@ class FrameEngine(
         val outcome = library.sync()
         val after = library.entries.mapTo(mutableSetOf()) { it.item.path }
 
-        forgetVanished(before - after)
-        if (outcome.added > 0) rebuildTail()
-        refill()
+        withContext(Dispatchers.Default) {
+            queueLock.withLock {
+                forgetVanished(before - after)
+                if (outcome.added > 0) rebuildTail()
+                refill()
+            }
+        }
         return outcome
     }
 
@@ -216,7 +228,7 @@ class FrameEngine(
             unshowable = entries.count { !it.item.isShowable },
             shown = entries.count { it.lastShownAtMillis != null },
             syncedAtMillis = library.syncedAtMillis,
-            failed = failures.size,
+            failed = synchronized(failures) { failures.size },
             tooSmall = minPhotoLongSide().let { minimum -> entries.count { it.isSmallerThan(minimum) } },
         )
     }
@@ -262,7 +274,7 @@ class FrameEngine(
                         fetched++
                         // Размер стал известен только сейчас: мелочь из
                         // очереди вон, пока не дошла до экрана.
-                        if (isTooSmall(item.path)) queue.remove(item.path)
+                        if (isTooSmall(item.path)) queueLock.withLock { queue.remove(item.path) }
                     }
 
                     PlannedDelivery.Stream -> streamed++
@@ -271,7 +283,7 @@ class FrameEngine(
                 // Один недоступный файл не должен срывать подготовку остальных,
                 // но и молчать о нём нельзя: владелец увидит причину в
                 // диагностике и поймёт, почему снимок не появляется.
-                failures[item.path] = e.message ?: e.javaClass.simpleName
+                synchronized(failures) { failures[item.path] = e.message ?: e.javaClass.simpleName }
             }
         }
 
@@ -320,16 +332,16 @@ class FrameEngine(
      * упирается в незакачанное. Библиотека же по большей части давно лежит
      * на устройстве; лучше показать из неё, чем чёрный экран.
      */
-    fun cachedFallback(): MediaItem? {
+    suspend fun cachedFallback(): MediaItem? = withContext(Dispatchers.Default) {
         val ready = candidates().filter { entry ->
             entry.item.kind == MediaKind.PHOTO &&
                 PreviewSize.entries.all { cache.has(previewKey(entry.item.path, it)) }
         }
         // Очередь не исключается: закачано как раз то, что в ней стояло, а
         // не открылось из неё то, что закачать не успели.
-        val picked = playlist.pick(ready, emptySet(), clock()) ?: return null
+        val picked = playlist.pick(ready, emptySet(), clock()) ?: return@withContext null
         library.markShown(picked.item.path)
-        return picked.item
+        picked.item
     }
 
     private fun previewKey(path: String, size: PreviewSize) = CacheKey.forPreview(path, size)
@@ -358,10 +370,12 @@ class FrameEngine(
     private enum class PlannedDelivery { Cached, Stream }
 
     /** Ближайшие кадры — их и предстоит подгрузить заранее. */
-    fun upcoming(): List<MediaItem> {
-        refill()
-        val known = library.entries.associateBy { it.item.path }
-        return queue.mapNotNull { known[it]?.item }
+    suspend fun upcoming(): List<MediaItem> = withContext(Dispatchers.Default) {
+        queueLock.withLock {
+            refill()
+            val known = library.entries.associateBy { it.item.path }
+            queue.mapNotNull { known[it]?.item }
+        }
     }
 
     /**
@@ -371,11 +385,15 @@ class FrameEngine(
      * иначе неудачная загрузка оставила бы элемент вечно «не показанным», и
      * порядок раз за разом упирался бы в один и тот же битый файл.
      */
-    fun advance(): MediaItem? {
+    suspend fun advance(): MediaItem? = withContext(Dispatchers.Default) {
+        queueLock.withLock { advanceLocked() }
+    }
+
+    private fun advanceLocked(): MediaItem? {
         refill()
         val path = queue.removeFirstOrNull() ?: return null
-        val entry = entryOf(path) ?: return advance()
-        if (entry.isSmallerThan(minPhotoLongSide())) return advance()
+        val entry = entryOf(path) ?: return advanceLocked()
+        if (entry.isSmallerThan(minPhotoLongSide())) return advanceLocked()
         library.markShown(path)
         refill()
         return entry.item
@@ -399,7 +417,7 @@ class FrameEngine(
     /** Что не удалось подготовить и почему — это показывает диагностика. */
     private val failures = linkedMapOf<String, String>()
 
-    val failed: Map<String, String> get() = failures.toMap()
+    val failed: Map<String, String> get() = synchronized(failures) { failures.toMap() }
 }
 
 /** Что известно о папке. */

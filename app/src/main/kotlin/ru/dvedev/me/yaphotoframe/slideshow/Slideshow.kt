@@ -17,9 +17,9 @@ import java.util.concurrent.atomic.AtomicInteger
  * каждой смене был бы виден провал в чёрное на время загрузки.
  */
 class Slideshow(
-    private val nextItem: () -> MediaItem?,
+    private val nextItem: suspend () -> MediaItem?,
     /** Куда вернуться при листании назад; null — истории нет. */
-    private val previousItem: () -> MediaItem? = { null },
+    private val previousItem: suspend () -> MediaItem? = { null },
     private val preparer: FramePreparer,
     private val showDurationMillis: () -> Long,
     /** Сводить ли вертикальные снимки в пары. */
@@ -34,7 +34,7 @@ class Slideshow(
      */
     private val animateFirst: Boolean = false,
     /** Кадр, не требующий сети, когда очередь не открывается; null — нет такого. */
-    private val fallbackItem: () -> MediaItem? = { null },
+    private val fallbackItem: suspend () -> MediaItem? = { null },
     /** Сюда сообщается о каждом пропущенном кадре — владелец увидит причину. */
     private val onSkip: (MediaItem, Exception) -> Unit = { _, _ -> },
 ) {

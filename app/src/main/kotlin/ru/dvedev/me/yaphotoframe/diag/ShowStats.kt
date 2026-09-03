@@ -17,18 +17,27 @@ class ShowStats(private val file: File) {
 
     private val counts = LongArray(HOURS)
 
+    /** Файл пишется в фоне: запись с главного потока попадала ровно на смену кадра. */
+    private val writer = java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "show-stats").apply { isDaemon = true }
+    }
+
     init {
         load()
     }
 
+    @Synchronized
     fun record(atMillis: Long) {
         val calendar = Calendar.getInstance().apply { timeInMillis = atMillis }
         counts[calendar.get(Calendar.HOUR_OF_DAY)]++
-        save()
+        val line = counts.joinToString(",")
+        writer.execute { save(line) }
     }
 
+    @Synchronized
     fun byHour(): List<Long> = counts.toList()
 
+    @Synchronized
     fun total(): Long = counts.sum()
 
     private fun load() {
@@ -40,10 +49,10 @@ class ShowStats(private val file: File) {
         }
     }
 
-    private fun save() {
+    private fun save(line: String) {
         runCatching {
             file.parentFile?.mkdirs()
-            file.writeText(counts.joinToString(","))
+            file.writeText(line)
         }
     }
 

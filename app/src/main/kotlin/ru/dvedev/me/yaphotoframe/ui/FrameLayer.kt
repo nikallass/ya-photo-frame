@@ -5,7 +5,8 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.view.Gravity
 import android.view.View
-import android.view.animation.LinearInterpolator
+import android.os.Handler
+import android.os.Looper
 import android.widget.FrameLayout
 import android.widget.ImageView
 import kotlin.math.min
@@ -122,15 +123,60 @@ class FrameLayer(context: Context) : FrameLayout(context) {
 
         val startX = if (fromCurrentPosition) pairHolder.translationX else 0f
         val startY = if (fromCurrentPosition) pairHolder.translationY else 0f
-        pairHolder.animate().cancel()
+        stopDrift()
         pairHolder.translationX = startX
         pairHolder.translationY = startY
-        pairHolder.animate()
-            .translationX(travelX * direction.first)
-            .translationY(travelY * direction.second)
-            .setDuration(driftMillis)
-            .setInterpolator(LinearInterpolator())
-            .start()
+        drift = Drift(
+            startedAt = System.currentTimeMillis(),
+            durationMillis = driftMillis,
+            fromX = startX,
+            fromY = startY,
+            toX = travelX * direction.first,
+            toY = travelY * direction.second,
+        )
+        driftHandler.post(driftTick)
+    }
+
+    private class Drift(
+        val startedAt: Long,
+        val durationMillis: Long,
+        val fromX: Float,
+        val fromY: Float,
+        val toX: Float,
+        val toY: Float,
+    )
+
+    private var drift: Drift? = null
+    private val driftHandler = Handler(Looper.getMainLooper())
+
+    /**
+     * Шаг хода.
+     *
+     * Аниматор гнал бы перерисовку всего экрана шестьдесят раз в секунду ради
+     * сдвига в пиксель за секунду — телевизор не успевал, и растворение при
+     * смене кадра дёргалось. Дюжины шагов в секунду хватает: шаг выходит меньше
+     * пикселя, а фильтрация при отрисовке сглаживает и его.
+     */
+    private val driftTick = object : Runnable {
+        override fun run() {
+            val current = drift ?: return
+            val progress = ((System.currentTimeMillis() - current.startedAt).toFloat() /
+                current.durationMillis).coerceIn(0f, 1f)
+            pairHolder.translationX = current.fromX + (current.toX - current.fromX) * progress
+            pairHolder.translationY = current.fromY + (current.toY - current.fromY) * progress
+            if (progress < 1f) driftHandler.postDelayed(this, DRIFT_TICK_MILLIS) else drift = null
+        }
+    }
+
+    /** Замирает на месте — например, на время растворения, чтобы слой не перерисовывался. */
+    fun stopDrift() {
+        drift = null
+        driftHandler.removeCallbacks(driftTick)
+    }
+
+    override fun onDetachedFromWindow() {
+        stopDrift()
+        super.onDetachedFromWindow()
     }
 
     /**
@@ -148,7 +194,7 @@ class FrameLayer(context: Context) : FrameLayout(context) {
     }
 
     fun clear() {
-        pairHolder.animate().cancel()
+        stopDrift()
         frameView.setImageDrawable(null)
         companionView.setImageDrawable(null)
         backgroundView.setImageDrawable(null)
@@ -272,6 +318,9 @@ class FrameLayer(context: Context) : FrameLayout(context) {
     }
 
     private companion object {
+        /** Около двенадцати шагов в секунду. */
+        const val DRIFT_TICK_MILLIS = 80L
+
         const val MILLIS_PER_MINUTE = 60_000f
         const val MIN_DRIFT_SPEED = 0.0005f
         const val MIN_DRIFT_MILLIS = 200L
