@@ -264,6 +264,12 @@ class SetupActivity : Activity() {
         rows += Row("Длина хода", "насколько уезжает кадр", { percent(it.driftAmplitude) }) { s, d ->
             s.copy(driftAmplitude = s.driftAmplitude + d * 0.005f)
         }
+        rows += Row("Приближение", "на сколько кадр вырастает", { percent(it.zoomAmount) }) { s, d ->
+            s.copy(zoomAmount = s.zoomAmount + d * 0.01f)
+        }
+        rows += Row("Скорость приближения", "за минуту", { percent(it.zoomSpeedPerMinute) }) { s, d ->
+            s.copy(zoomSpeedPerMinute = s.zoomSpeedPerMinute + d * 0.01f)
+        }
         rows += Row("Скорость хода", "за минуту", { percent(it.driftSpeedPerMinute) }) { s, d ->
             s.copy(driftSpeedPerMinute = s.driftSpeedPerMinute + d * 0.005f)
         }

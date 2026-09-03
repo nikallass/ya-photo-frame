@@ -13,6 +13,7 @@ import ru.dvedev.me.yaphotoframe.library.LibraryStore
 import ru.dvedev.me.yaphotoframe.library.MediaLibrary
 import ru.dvedev.me.yaphotoframe.library.SyncOutcome
 import ru.dvedev.me.yaphotoframe.media.Folder
+import ru.dvedev.me.yaphotoframe.media.FolderSelection
 import ru.dvedev.me.yaphotoframe.media.MediaItem
 import ru.dvedev.me.yaphotoframe.media.MediaKind
 import ru.dvedev.me.yaphotoframe.media.MediaSource
@@ -70,6 +71,14 @@ class FrameEngine(
      * Снаружи, потому что движок про картинки ничего не знает.
      */
     private val measure: (MediaItem, File) -> Int? = { _, _ -> null },
+    /**
+     * Текущий отбор подпапок.
+     *
+     * Обход по новому отбору идёт минуты, а владелец снял галочки и ждёт, что
+     * снимки из снятых папок пропадут сейчас. Поэтому отбор применяется к
+     * кандидатам сразу, до обхода; обход потом лишь подчистит индекс.
+     */
+    private val selection: () -> FolderSelection = { FolderSelection.ALL },
 ) {
 
     private val library = MediaLibrary(source, store, clock)
@@ -97,7 +106,19 @@ class FrameEngine(
     private fun candidates(): List<LibraryEntry> {
         val all = if (includeVideo()) library.showable() else library.showablePhotos()
         val minimum = minPhotoLongSide()
-        return if (minimum <= 0) all else all.filter { !it.isSmallerThan(minimum) }
+        val chosen = selection()
+        return all.filter { entry ->
+            chosen.includes(entry.item.path) && (minimum <= 0 || !entry.isSmallerThan(minimum))
+        }
+    }
+
+    /** Выбрасывает из очереди то, что новый отбор не включает, и набирает заново. */
+    suspend fun applySelection() = withContext(Dispatchers.Default) {
+        queueLock.withLock {
+            val chosen = selection()
+            queue.retainAll { chosen.includes(it) }
+            refill()
+        }
     }
 
     private fun entryOf(path: String): LibraryEntry? =
@@ -109,16 +130,20 @@ class FrameEngine(
     /** Обходит хранилище, обновляет индекс и приводит очередь в соответствие. */
     suspend fun sync(): SyncOutcome {
         val before = library.entries.map { it.item.path }.toSet()
-        val outcome = library.sync()
+        val outcome = library.sync(inScope = selection()::includes)
         val after = library.entries.mapTo(mutableSetOf()) { it.item.path }
+        val vanished = before - after
 
         withContext(Dispatchers.Default) {
             queueLock.withLock {
-                forgetVanished(before - after)
+                queue.retainAll { it !in vanished }
                 if (outcome.added > 0) rebuildTail()
                 refill()
             }
         }
+        // Копии исчезнувшего убираются уже без замка: удаление тысяч файлов
+        // на флеш-памяти — секунды, и всё это время очередь была бы недоступна.
+        withContext(Dispatchers.IO) { forgetVanished(vanished) }
         return outcome
     }
 
@@ -144,7 +169,6 @@ class FrameEngine(
      */
     private fun forgetVanished(vanished: Set<String>) {
         if (vanished.isEmpty()) return
-        queue.retainAll { it !in vanished }
         vanished.forEach { path ->
             PreviewSize.entries.forEach { size -> cache.remove(previewKey(path, size)) }
             cache.remove(originalKey(path))

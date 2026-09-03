@@ -2,7 +2,9 @@ package ru.dvedev.me.yaphotoframe.media.yandex
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl
@@ -61,6 +63,9 @@ class YandexPublicDiskSource(
 
         var folders = 0
         while (queue.isNotEmpty() && collected.size < MAX_ITEMS) {
+            // Обход на минуты, и его отменяют, когда владелец меняет отбор:
+            // проверяемся на каждой папке, между запросами.
+            currentCoroutineContext().ensureActive()
             val (path, depth) = queue.removeFirst()
             val entries = listFolder(path)
             folders++

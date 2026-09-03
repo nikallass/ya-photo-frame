@@ -24,6 +24,7 @@ import ru.dvedev.me.yaphotoframe.cache.MediaCache
 import ru.dvedev.me.yaphotoframe.cache.MediaFetcher
 import ru.dvedev.me.yaphotoframe.library.FolderIndexStore
 import ru.dvedev.me.yaphotoframe.library.LibraryStore
+import ru.dvedev.me.yaphotoframe.media.FolderSelection
 import ru.dvedev.me.yaphotoframe.media.MediaItem
 import ru.dvedev.me.yaphotoframe.media.MediaKind
 import ru.dvedev.me.yaphotoframe.media.PreviewSize
@@ -597,6 +598,31 @@ class FrameEngineTest {
     }
 
     @Test
+    fun `снятая с отбора папка не теряет ни записей в индексе, ни копий в кэше`() = runTest {
+        var chosen = FolderSelection.ALL
+        // Древесные фикстуры нарезаны страницами по две записи — размер страницы обычный.
+        val engine = library(selection = { chosen })
+        engine.sync()
+        val allPaths = engine.entries.map { it.item.path }
+        assertTrue("в индексе есть и «Отпуск», и «Дети»",
+            allPaths.any { it.startsWith("/Отпуск/") } && allPaths.any { it.startsWith("/Дети/") })
+        // Закачать всё, что в очереди, чтобы было чему пропадать.
+        repeat(4) { engine.prefetch(); engine.advance() }
+        val cachedBefore = cachedNames().size
+        assertTrue("кэш не пуст", cachedBefore > 0)
+
+        // Владелец оставил только «Дети».
+        chosen = FolderSelection.of(setOf("/Дети"))
+        engine.applySelection()
+        engine.sync()
+
+        assertEquals("записи вне отбора остались", allPaths.toSet(), engine.entries.map { it.item.path }.toSet())
+        assertEquals("копии вне отбора не стёрты", cachedBefore, cachedNames().size)
+        val shown = (1..12).mapNotNull { engine.advance() }.map { it.path }
+        assertTrue("а показывается только отобранное: $shown", shown.isNotEmpty() && shown.all { it.startsWith("/Дети/") })
+    }
+
+    @Test
     fun `добавленное не ждёт, пока исчерпается очередь`() = runTest {
         switchToBulkFolder()
         val engine = library(pageLimit = 50)
@@ -697,13 +723,16 @@ class FrameEngineTest {
         minLongSide: () -> Int = { 0 },
         measure: (MediaItem, File) -> Int? = { _, _ -> null },
         tuning: PlaylistTuning = PlaylistTuning(),
+        selection: () -> FolderSelection = { FolderSelection.ALL },
     ) = FrameEngine(
         source = YandexPublicDiskSource(
             publicKey = "https://disk.yandex.ru/d/TEST",
             http = OkHttpClient(),
             apiBase = server.url("/v1/disk/public/resources"),
             pageLimit = pageLimit,
+            selection = selection,
         ),
+        selection = selection,
         store = LibraryStore(indexFile),
         folderStore = FolderIndexStore(File(cacheDirectory, "folders.json")),
         cache = cache(),

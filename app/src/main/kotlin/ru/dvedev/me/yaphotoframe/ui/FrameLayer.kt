@@ -85,11 +85,22 @@ class FrameLayer(context: Context) : FrameLayout(context) {
         companionDateView.text = companionDateText.orEmpty()
         companionDateView.visibility =
             if (companion == null || companionDateText == null) GONE else VISIBLE
-        pairHolder.translationX = 0f
-        pairHolder.translationY = 0f
+        resetMotion()
 
         applyPlacement()
     }
+
+    private fun resetMotion() {
+        stopDrift()
+        translationX = 0f; translationY = 0f; scaleX = 1f; scaleY = 1f
+        pairHolder.translationX = 0f; pairHolder.translationY = 0f
+        pairHolder.scaleX = 1f; pairHolder.scaleY = 1f
+    }
+
+    /** Сколько кадр уже уехал — сумма по обоим носителям движения. */
+    private fun offsetX() = translationX + pairHolder.translationX
+    private fun offsetY() = translationY + pairHolder.translationY
+    private fun currentScale() = scaleX * pairHolder.scaleX
 
     /**
      * Пускает кадр в медленный дрейф.
@@ -108,24 +119,35 @@ class FrameLayer(context: Context) : FrameLayout(context) {
         val bounds = contentBounds() ?: return
         val direction = placement.driftDirection()
 
-        val roomX = if (direction.first > 0) width - bounds.right else bounds.left
-        val roomY = if (direction.second > 0) height - bounds.bottom else bounds.top
+        // Приближение раздвигает кадр на половину прироста в каждую сторону —
+        // столько же надо оставить до края.
+        val zoom = settings.zoomAmount.coerceAtLeast(0f)
+        val growX = (bounds.right - bounds.left) * zoom / 2
+        val growY = (bounds.bottom - bounds.top) * zoom / 2
+        val roomX = (if (direction.first > 0) width - bounds.right else bounds.left) - growX
+        val roomY = (if (direction.second > 0) height - bounds.bottom else bounds.top) - growY
 
         val wanted = width * settings.driftAmplitude
-        val travelX = min(wanted, roomX.toFloat().coerceAtLeast(0f))
-        val travelY = min(wanted, roomY.toFloat().coerceAtLeast(0f))
-        if (travelX <= 1f && travelY <= 1f) return
+        val travelX = min(wanted, roomX.coerceAtLeast(0f))
+        val travelY = min(wanted, roomY.coerceAtLeast(0f))
 
         val speed = settings.driftSpeedPerMinute.coerceAtLeast(MIN_DRIFT_SPEED)
         val distance = maxOf(travelX, travelY) / width
         val driftMillis = (distance / speed * MILLIS_PER_MINUTE).toLong()
             .coerceIn(MIN_DRIFT_MILLIS, durationMillis)
+        val zoomSpeed = settings.zoomSpeedPerMinute.coerceAtLeast(MIN_DRIFT_SPEED)
+        val zoomMillis = (zoom / zoomSpeed * MILLIS_PER_MINUTE).toLong()
+            .coerceIn(MIN_DRIFT_MILLIS, durationMillis)
 
-        val startX = if (fromCurrentPosition) pairHolder.translationX else 0f
-        val startY = if (fromCurrentPosition) pairHolder.translationY else 0f
+        val startX = if (fromCurrentPosition) offsetX() else 0f
+        val startY = if (fromCurrentPosition) offsetY() else 0f
+        val startScale = if (fromCurrentPosition) currentScale() else 1f
         stopDrift()
-        pairHolder.translationX = startX
-        pairHolder.translationY = startY
+        // Растёт кадр вокруг своей середины, а не вокруг угла экрана.
+        val pivotX = (bounds.left + bounds.right) / 2f
+        val pivotY = (bounds.top + bounds.bottom) / 2f
+        pairHolder.pivotX = pivotX; pairHolder.pivotY = pivotY
+        this.pivotX = pivotX; this.pivotY = pivotY
         drift = Drift(
             startedAt = System.currentTimeMillis(),
             durationMillis = driftMillis,
@@ -133,8 +155,11 @@ class FrameLayer(context: Context) : FrameLayout(context) {
             fromY = startY,
             toX = travelX * direction.first,
             toY = travelY * direction.second,
+            zoomMillis = zoomMillis,
+            fromScale = startScale,
+            toScale = 1f + zoom,
         )
-        driftHandler.post(driftTick)
+        driftTick.run()
     }
 
     private class Drift(
@@ -144,6 +169,9 @@ class FrameLayer(context: Context) : FrameLayout(context) {
         val fromY: Float,
         val toX: Float,
         val toY: Float,
+        val zoomMillis: Long,
+        val fromScale: Float,
+        val toScale: Float,
     )
 
     private var drift: Drift? = null
@@ -160,11 +188,31 @@ class FrameLayer(context: Context) : FrameLayout(context) {
     private val driftTick = object : Runnable {
         override fun run() {
             val current = drift ?: return
-            val progress = ((System.currentTimeMillis() - current.startedAt).toFloat() /
-                current.durationMillis).coerceIn(0f, 1f)
-            pairHolder.translationX = current.fromX + (current.toX - current.fromX) * progress
-            pairHolder.translationY = current.fromY + (current.toY - current.fromY) * progress
-            if (progress < 1f) driftHandler.postDelayed(this, DRIFT_TICK_MILLIS) else drift = null
+            val elapsed = (System.currentTimeMillis() - current.startedAt).toFloat()
+            val progress = (elapsed / current.durationMillis).coerceIn(0f, 1f)
+            val zoomProgress = (elapsed / current.zoomMillis).coerceIn(0f, 1f)
+            val x = current.fromX + (current.toX - current.fromX) * progress
+            val y = current.fromY + (current.toY - current.fromY) * progress
+            val scale = current.fromScale + (current.toScale - current.fromScale) * zoomProgress
+
+            // Пока слой лежит в аппаратном буфере (идёт растворение), двигаем и
+            // растим слой целиком: это бесплатно, буфер не перерисовывается.
+            // Фон при этом уезжает на те же пиксели — на размытом это не видно.
+            // Потом движение переносится на обойму со снимком, и фон стоит.
+            if (layerType == LAYER_TYPE_HARDWARE) {
+                pairHolder.translationX = 0f; pairHolder.translationY = 0f
+                pairHolder.scaleX = 1f; pairHolder.scaleY = 1f
+                translationX = x; translationY = y; scaleX = scale; scaleY = scale
+            } else {
+                translationX = 0f; translationY = 0f; scaleX = 1f; scaleY = 1f
+                pairHolder.translationX = x; pairHolder.translationY = y
+                pairHolder.scaleX = scale; pairHolder.scaleY = scale
+            }
+            if (progress < 1f || zoomProgress < 1f) {
+                driftHandler.postDelayed(this, DRIFT_TICK_MILLIS)
+            } else {
+                drift = null
+            }
         }
     }
 
@@ -194,7 +242,7 @@ class FrameLayer(context: Context) : FrameLayout(context) {
     }
 
     fun clear() {
-        stopDrift()
+        resetMotion()
         frameView.setImageDrawable(null)
         companionView.setImageDrawable(null)
         backgroundView.setImageDrawable(null)

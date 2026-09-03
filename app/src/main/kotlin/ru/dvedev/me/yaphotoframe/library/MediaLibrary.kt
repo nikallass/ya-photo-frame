@@ -3,6 +3,8 @@ package ru.dvedev.me.yaphotoframe.library
 import ru.dvedev.me.yaphotoframe.media.MediaItem
 import ru.dvedev.me.yaphotoframe.media.MediaKind
 import ru.dvedev.me.yaphotoframe.media.MediaSource
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -64,8 +66,11 @@ class MediaLibrary(
      * Память о показах переносится на совпадающие пути: обход обновляет сведения
      * о файлах, но не должен обнулять порядок показа.
      */
-    suspend fun sync(): SyncOutcome {
+    suspend fun sync(inScope: (String) -> Boolean = { true }): SyncOutcome {
         val fresh = source.list()
+        // Обход отменили (сменился отбор) — его результат уже никому не нужен,
+        // и подменять им индекс нельзя.
+        currentCoroutineContext().ensureActive()
         val remembered = snapshot.entries.associateBy { it.item.path }
         // Первый обход не делает свежим всё подряд: тогда бонусу не на что
         // действовать. А вот появившееся в уже живой библиотеке — из
@@ -73,7 +78,12 @@ class MediaLibrary(
         val firstSync = remembered.isEmpty()
         val now = clock()
 
-        val entries = fresh.map { item ->
+        // То, что вне отбора, обход не видел — и трогать его нельзя: владелец
+        // снял галочку с папки не для того, чтобы потерять её кэш и память о
+        // показах. Вернёт галочку — всё на месте. Показу такие записи не
+        // мешают: движок отбирает кандидатов по текущему отбору.
+        val kept = snapshot.entries.filter { !inScope(it.item.path) }
+        val entries = kept + fresh.map { item ->
             val known = remembered[item.path]
             LibraryEntry(
                 item = item,
@@ -87,8 +97,8 @@ class MediaLibrary(
         }
 
         val known = fresh.mapTo(mutableSetOf()) { it.path }
-        val removed = remembered.keys.count { it !in known }
-        val added = entries.count { it.item.path !in remembered }
+        val removed = remembered.keys.count { it !in known && inScope(it) }
+        val added = fresh.count { it.path !in remembered }
 
         synchronized(this) { snapshot = LibrarySnapshot(syncedAtMillis = now, entries = entries) }
         // Обход и так идёт в фоновом потоке, и его результат терять нельзя —

@@ -67,6 +67,8 @@ class SettingsStore(context: Context) {
             crossfadeMillis = prefs.getLong(KEY_CROSSFADE, defaults.crossfadeMillis),
             driftAmplitude = prefs.getFloat(KEY_DRIFT, defaults.driftAmplitude),
             driftSpeedPerMinute = prefs.getFloat(KEY_DRIFT_SPEED, defaults.driftSpeedPerMinute),
+            zoomAmount = prefs.getFloat(KEY_ZOOM, defaults.zoomAmount),
+            zoomSpeedPerMinute = prefs.getFloat(KEY_ZOOM_SPEED, defaults.zoomSpeedPerMinute),
             frameInset = prefs.getFloat(KEY_INSET, defaults.frameInset),
             edgeMargin = prefs.getFloat(KEY_MARGIN, defaults.edgeMargin),
             placementStrength = prefs.getFloat(KEY_PLACEMENT, defaults.placementStrength),
@@ -110,6 +112,8 @@ class SettingsStore(context: Context) {
             .putLong(KEY_CROSSFADE, value.crossfadeMillis)
             .putFloat(KEY_DRIFT, value.driftAmplitude)
             .putFloat(KEY_DRIFT_SPEED, value.driftSpeedPerMinute)
+            .putFloat(KEY_ZOOM, value.zoomAmount)
+            .putFloat(KEY_ZOOM_SPEED, value.zoomSpeedPerMinute)
             .putFloat(KEY_INSET, value.frameInset)
             .putFloat(KEY_MARGIN, value.edgeMargin)
             .putFloat(KEY_PLACEMENT, value.placementStrength)
@@ -139,6 +143,8 @@ class SettingsStore(context: Context) {
         const val KEY_CROSSFADE = "crossfade_millis"
         const val KEY_DRIFT = "drift_amplitude"
         const val KEY_DRIFT_SPEED = "drift_speed_per_minute"
+        const val KEY_ZOOM = "zoom_amount"
+        const val KEY_ZOOM_SPEED = "zoom_speed_per_minute"
         const val KEY_INSET = "frame_inset"
         const val KEY_MARGIN = "edge_margin"
         const val KEY_PLACEMENT = "placement_strength"
@@ -185,6 +191,8 @@ fun FrameSettings.sanitized(): FrameSettings {
         crossfadeMillis = crossfadeMillis.coerceIn(0L, 10_000L),
         driftAmplitude = driftAmplitude.coerceIn(0f, 0.30f),
         driftSpeedPerMinute = driftSpeedPerMinute.coerceIn(0f, 0.60f),
+        zoomAmount = zoomAmount.coerceIn(0f, 0.30f),
+        zoomSpeedPerMinute = zoomSpeedPerMinute.coerceIn(0f, 0.60f),
         frameInset = frameInset.coerceIn(0.3f, 1f),
         edgeMargin = edgeMargin.coerceIn(0f, 0.25f),
         placementStrength = placementStrength.coerceIn(0f, 1f),

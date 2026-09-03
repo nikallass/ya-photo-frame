@@ -121,10 +121,10 @@ class FrameDreamService : DreamService() {
                     // не показывается.
                     activeSelection = settings.selectedFolders
                     Diary.note("отбор папок изменился: выбрано ${settings.selectedFolders.size}")
-                    scope.launch {
-                        runCatching { engine?.sync()?.let(::report) }
-                            .onFailure { Diary.problem("обход после смены отбора не удался", it) }
-                    }
+                    // Сначала очередь: снятое пропадает с экрана сразу, а не
+                    // после обхода. Обход — следом, с отменой идущего.
+                    scope.launch { runCatching { engine?.applySelection() } }
+                    launchSync("обход после смены отбора не удался")
                 }
             }
         }
@@ -287,7 +287,7 @@ class FrameDreamService : DreamService() {
                 source = YandexPublicDiskSource(
                     publicKey = store.current.folderUrl,
                     http = Http.client,
-                    selection = { FolderSelection.of(store.current.selectedFolders) },
+                    selection = ::currentSelection,
                     onProgress = { files, folders ->
                         indexing = if (folders < 0) {
                             null
@@ -312,6 +312,7 @@ class FrameDreamService : DreamService() {
                 includeVideo = { store.current.showVideo },
                 minPhotoLongSide = ::minPhotoLongSide,
                 measure = { _, file -> imageLongSide(file) },
+                selection = ::currentSelection,
                 tuning = {
                     PlaylistTuning(
                         freshnessWindowMillis =
@@ -336,7 +337,10 @@ class FrameDreamService : DreamService() {
             val cameUpCold = showColdStart(engine, preparer)
 
             if (engine.showablePhotos().isEmpty()) {
-                report(engine.sync())
+                // Через общий запуск: если владелец за время первого обхода
+                // сменит отбор, этот обход отменится, а мы дождёмся следующего.
+                launchSync("первый обход не удался")
+                awaitSyncs()
                 if (engine.showablePhotos().isEmpty()) {
                     // Показывать нечего: либо рамку только что поставили, либо
                     // ссылка перестала работать. Чёрный экран выглядел бы
@@ -399,6 +403,43 @@ class FrameDreamService : DreamService() {
         lastSkipMessage = message
         lastSkipAtMillis = now
         Diary.problem("пропускаю ${item.name}: $message")
+    }
+
+    private fun currentSelection() = FolderSelection.of(store.current.selectedFolders)
+
+    /**
+     * Единственный идущий обход.
+     *
+     * Новый обход отменяет предыдущий: два обхода подряд по разным отборам
+     * иначе заканчивались бы в непредсказуемом порядке, и индекс мог остаться
+     * от устаревшего.
+     */
+    private var syncJob: kotlinx.coroutines.Job? = null
+
+    private fun launchSync(failureMessage: String) {
+        syncJob?.cancel()
+        syncJob = scope.launch {
+            try {
+                engine?.sync()?.let(::report)
+            } catch (e: CancellationException) {
+                indexing = null
+                Diary.note("обход прерван: отбор изменился")
+                throw e
+            } catch (e: Exception) {
+                indexing = null
+                Diary.problem(failureMessage, e)
+            }
+        }
+    }
+
+    /** Ждёт, пока не закончится текущий обход — и тот, что его сменил. */
+    private suspend fun awaitSyncs() {
+        var job = syncJob
+        while (job != null) {
+            job.join()
+            val next = syncJob
+            job = if (next != null && next !== job && next.isActive) next else null
+        }
     }
 
     /** Идущий обход: сколько файлов и папок пройдено. Null — обход не идёт. */
@@ -611,12 +652,7 @@ class FrameDreamService : DreamService() {
                     }
                 },
                 host = "dream",
-                onRefresh = {
-                    scope.launch {
-                        runCatching { engine?.sync()?.let(::report) }
-                            .onFailure { Diary.problem("обход по требованию не удался", it) }
-                    }
-                },
+                onRefresh = { launchSync("обход по требованию не удался") },
             ).also { it.start() }
         } else if (!enabled && tuner != null) {
             tuner?.stop()

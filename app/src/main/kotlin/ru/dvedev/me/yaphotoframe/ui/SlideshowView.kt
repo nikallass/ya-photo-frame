@@ -104,10 +104,12 @@ class SlideshowView(context: Context) : FrameLayout(context) {
         if (outgoing !== incoming && outgoing is FrameLayer) outgoing.stopDrift()
         startFade(incoming, duration) {
             if (outgoing !== incoming) release(outgoing)
-            // Ход стартует после растворения: пока слой в буфере, каждый
-            // сдвиг перерисовывал бы буфер целиком. За полторы секунды кадр
-            // всё равно сдвинулся бы на пиксель.
-            if (incoming is FrameLayer) incoming.startDrift(settings.showDurationMillis)
+        }
+        // Ход идёт с первого кадра растворения: когда он стартовал по его
+        // окончании, последние доли секунды перехода кадр стоял, и это
+        // читалось как заминка.
+        if (incoming is FrameLayer) {
+            incoming.startDrift(settings.showDurationMillis + settings.crossfadeMillis)
         }
     }
 

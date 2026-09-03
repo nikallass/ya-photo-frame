@@ -270,6 +270,14 @@ const FIELDS = [
     min: 0, max: 600, step: 1, get: v => Math.round(v * 1000), set: s => s / 1000,
     show: v => (v * 100).toFixed(1) + ' % в минуту' },
 
+  { key: 'zoomAmount', name: 'Приближение', note: 'на сколько кадр вырастает за показ; 0 — без приближения',
+    min: 0, max: 30, step: 1, get: v => Math.round(v * 100), set: s => s / 100,
+    show: v => v ? Math.round(v * 100) + ' %' : 'нет' },
+
+  { key: 'zoomSpeedPerMinute', name: 'Скорость приближения', note: 'на сколько вырастает за минуту',
+    min: 0, max: 60, step: 1, get: v => Math.round(v * 100), set: s => s / 100,
+    show: v => Math.round(v * 100) + ' % в минуту' },
+
   { key: 'frameInset', name: 'Размер кадра', note: 'доля экрана, в которую вписан снимок',
     min: 30, max: 100, step: 1, get: v => Math.round(v * 100), set: s => s / 100,
     show: v => Math.round(v * 100) + ' %' },
@@ -293,9 +301,15 @@ const FIELDS = [
     min: 0, max: 60, step: 5, get: v => Math.round(v * 100), set: s => s / 100,
     show: v => v ? Math.round(v * 100) + ' % экрана' : 'показывать всё' },
 
-  { key: 'freshnessWindowDays', name: 'Считать свежим', note: 'сколько дней после заливки или первого появления в рамке снимок выпадает чаще',
-    min: 1, max: 730, step: 1, get: v => v, set: s => s,
-    show: v => v < 60 ? v + ' дн.' : (v/30).toFixed(0) + ' мес.' },
+  // Ползунок нелинейный: левая половина — дни от 1 до 30, правая — от месяца
+  // до года. Иначе на прямой шкале до года первый месяц занимал бы палец.
+  { key: 'freshnessWindowDays', name: 'Считать свежим', note: 'сколько после заливки или первого появления в рамке снимок выпадает чаще',
+    min: 0, max: 100, step: 1,
+    get: v => v <= 30 ? Math.round((v - 1) / 29 * 50)
+                      : Math.round(50 + Math.log(Math.min(v, 365) / 30) / Math.log(365 / 30) * 50),
+    set: s => s <= 50 ? Math.round(1 + s / 50 * 29)
+                      : Math.round(30 * Math.pow(365 / 30, (s - 50) / 50)),
+    show: v => v < 30 ? v + ' дн.' : v >= 360 ? 'год' : Math.round(v / 30) + ' мес.' },
 
   { key: 'cacheBudgetBytes', name: 'Объём кэша', note: 'сколько места отдано под скачанное',
     min: 64, max: 8192, step: 64,

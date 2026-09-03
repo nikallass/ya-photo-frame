@@ -54,6 +54,9 @@ class SettingsReceiver : BroadcastReceiver() {
             "driftAmplitude" -> raw.toFloatOrNull()?.let { settings.copy(driftAmplitude = it) }
             "driftSpeedPerMinute" ->
                 raw.toFloatOrNull()?.let { settings.copy(driftSpeedPerMinute = it) }
+            "zoomAmount" -> raw.toFloatOrNull()?.let { settings.copy(zoomAmount = it) }
+            "zoomSpeedPerMinute" ->
+                raw.toFloatOrNull()?.let { settings.copy(zoomSpeedPerMinute = it) }
             "frameInset" -> raw.toFloatOrNull()?.let { settings.copy(frameInset = it) }
             "edgeMargin" -> raw.toFloatOrNull()?.let { settings.copy(edgeMargin = it) }
             "placementStrength" -> raw.toFloatOrNull()?.let { settings.copy(placementStrength = it) }

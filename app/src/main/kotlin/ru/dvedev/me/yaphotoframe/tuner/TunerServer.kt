@@ -255,6 +255,9 @@ class TunerServer(
                     ?: current.driftAmplitude,
                 driftSpeedPerMinute = values["driftSpeedPerMinute"]?.toFloatOrNull()
                     ?: current.driftSpeedPerMinute,
+                zoomAmount = values["zoomAmount"]?.toFloatOrNull() ?: current.zoomAmount,
+                zoomSpeedPerMinute = values["zoomSpeedPerMinute"]?.toFloatOrNull()
+                    ?: current.zoomSpeedPerMinute,
                 frameInset = values["frameInset"]?.toFloatOrNull() ?: current.frameInset,
                 edgeMargin = values["edgeMargin"]?.toFloatOrNull() ?: current.edgeMargin,
                 placementStrength = values["placementStrength"]?.toFloatOrNull()
@@ -304,6 +307,8 @@ class TunerServer(
         append("\"crossfadeMillis\":").append(settings.crossfadeMillis).append(',')
         append("\"driftAmplitude\":").append(settings.driftAmplitude).append(',')
         append("\"driftSpeedPerMinute\":").append(settings.driftSpeedPerMinute).append(',')
+        append("\"zoomAmount\":").append(settings.zoomAmount).append(',')
+        append("\"zoomSpeedPerMinute\":").append(settings.zoomSpeedPerMinute).append(',')
         append("\"frameInset\":").append(settings.frameInset).append(',')
         append("\"edgeMargin\":").append(settings.edgeMargin).append(',')
         append("\"placementStrength\":").append(settings.placementStrength).append(',')
