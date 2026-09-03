@@ -217,6 +217,11 @@ class TunerServer(
             method == "GET" && path == "/api/state" ->
                 respond(client, "200 OK", "application/json; charset=utf-8", diagnostics())
 
+            // Стеки всех потоков: релизную сборку снаружи не продампить, а
+            // рамка однажды встала на одном снимке и молчала.
+            method == "GET" && path == "/api/threads" ->
+                respond(client, "200 OK", "text/plain; charset=utf-8", ThreadDump.text())
+
             method == "POST" && path == "/api/rescan-folders" -> {
                 onRescanFolders()
                 respond(client, "200 OK", "application/json; charset=utf-8", "{\"ok\":true}")

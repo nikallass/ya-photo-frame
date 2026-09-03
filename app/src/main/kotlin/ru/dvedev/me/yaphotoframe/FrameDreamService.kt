@@ -417,6 +417,7 @@ class FrameDreamService : DreamService() {
                 animateFirst = cameUpCold,
                 fallbackItem = engine::cachedFallback,
                 onSkip = ::noteSkip,
+                onStuck = ::noteStuck,
             )
             this.slideshow = slideshow
             coroutineScope { slideshow.run(this) }
@@ -428,6 +429,12 @@ class FrameDreamService : DreamService() {
             // остаться подсказка, а не чернота.
             if (engine?.showablePhotos().isNullOrEmpty()) showGuide()
         }
+    }
+
+    /** Подготовка повисла: стеки всех потоков — в logcat, отметка — в дневник. */
+    private fun noteStuck() {
+        Diary.problem("подготовка кадра повисла дольше минуты, кадр пропущен; стеки потоков в logcat")
+        ru.dvedev.me.yaphotoframe.tuner.ThreadDump.text().lineSequence().forEach { Log.w(TAG, "stuck: $it") }
     }
 
     private var lastSkipMessage: String? = null

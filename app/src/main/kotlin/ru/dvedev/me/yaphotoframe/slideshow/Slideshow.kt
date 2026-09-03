@@ -6,6 +6,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withTimeoutOrNull
 import ru.dvedev.me.yaphotoframe.media.MediaItem
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -37,6 +38,8 @@ class Slideshow(
     private val fallbackItem: suspend () -> MediaItem? = { null },
     /** Сюда сообщается о каждом пропущенном кадре — владелец увидит причину. */
     private val onSkip: (MediaItem, Exception) -> Unit = { _, _ -> },
+    /** Подготовка кадра повисла — владелец увидит, где именно. */
+    private val onStuck: () -> Unit = {},
 ) {
 
     private val requested = AtomicInteger(0)
@@ -66,7 +69,17 @@ class Slideshow(
             waitOutShow(scope)
 
             val ahead = try {
-                preparing.await()
+                // Сторож: подготовка однажды повисла насовсем, и рамка стояла
+                // на одном снимке. Лучше пропустить кадр и записать, на чём
+                // висели, чем молчать.
+                withTimeoutOrNull(PREPARE_TIMEOUT_MILLIS) { preparing.await() } ?: run {
+                    if (preparing.isActive) {
+                        Log.w(TAG, "подготовка следующего кадра висит дольше минуты, пропускаю")
+                        onStuck()
+                        preparing.cancel()
+                    }
+                    null
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -228,5 +241,8 @@ class Slideshow(
 
         /** Пауза между заходами, когда подготовить не удалось ничего. */
         const val RETRY_MILLIS = 10_000L
+
+        /** Дольше этого кадр не готовится никогда; если готовится — он повис. */
+        const val PREPARE_TIMEOUT_MILLIS = 60_000L
     }
 }
