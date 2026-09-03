@@ -181,6 +181,10 @@
     <div class="name">Кэш</div>
     <div id="cache"></div>
     <div class="bar"><i id="cachebar"></i></div>
+    <div id="streamwrap" hidden>
+      <div class="note" id="streamnote">буфер потока</div>
+      <div class="bar"><i id="streambar"></i></div>
+    </div>
   </div>
   <div class="row">
     <div class="name">Показы по часам суток</div>
@@ -838,6 +842,16 @@ async function loadState() {
         (pr.wantedBytes ? ' (' + Math.round(pr.doneBytes / pr.wantedBytes * 100) + ' %)' : '')) : '');
     document.getElementById('cachebar').style.width =
       Math.min(100, c.budgetBytes ? c.usedBytes / c.budgetBytes * 100 : 0) + '%';
+    // Своя полоска у буфера потока: пока идёт подкачка — её ход, иначе занятость.
+    const sw = document.getElementById('streamwrap');
+    sw.hidden = !c.primeBudgetBytes;
+    if (c.primeBudgetBytes) {
+      const fill = pr && pr.wantedBytes ? pr.doneBytes / pr.wantedBytes : c.primedBytes / c.primeBudgetBytes;
+      document.getElementById('streambar').style.width = Math.min(100, fill * 100) + '%';
+      document.getElementById('streamnote').textContent = pr
+        ? 'подкачка: ' + pr.name + ' — ' + Math.round(fill * 100) + ' %'
+        : 'буфер потока: ' + bytes(c.primedBytes) + ' из ' + bytes(c.primeBudgetBytes);
+    }
 
     const peak = Math.max(1, ...d.hourly);
     document.getElementById('hours').innerHTML = d.hourly

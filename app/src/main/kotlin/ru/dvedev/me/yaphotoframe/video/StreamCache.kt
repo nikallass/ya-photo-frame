@@ -9,8 +9,12 @@ import androidx.media3.datasource.cache.CacheWriter
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicLong
 import ru.dvedev.me.yaphotoframe.engine.StreamPrimer
 import java.io.File
 
@@ -80,20 +84,48 @@ class ExoStreamPrimer(private val cache: SimpleCache) : StreamPrimer {
 
     override fun usedBytes(): Long = cache.cacheSpace
 
+    /**
+     * Качает несколькими соединениями сразу, каждое — свой кусок.
+     *
+     * Одно соединение с Диском на телевизоре даёт вдвое меньше, чем канал
+     * телевизора вообще; несколько кусков параллельно добирают остаток.
+     */
     override suspend fun prime(key: String, url: String, bytes: Long, onProgress: (Long) -> Unit) =
         withContext(Dispatchers.IO) {
-            val spec = DataSpec.Builder()
-                .setUri(url)
-                .setKey(key)
-                .setPosition(0)
-                .setLength(bytes)
-                .build()
-            val writer = CacheWriter(
-                StreamCache.dataSourceFactory(cache).createDataSource(),
-                spec,
-                null,
-            ) { _, bytesCached, _ -> onProgress(bytesCached) }
-            // Отмена снаружи прерывает поток — писатель на это и рассчитан.
-            runInterruptible { writer.cache() }
+            val lanes = if (bytes >= MIN_BYTES_PER_LANE * 2) LANES else 1
+            val chunk = (bytes + lanes - 1) / lanes
+            val done = AtomicLong(0)
+            coroutineScope {
+                (0 until lanes).map { lane ->
+                    async {
+                        val start = lane * chunk
+                        val length = minOf(chunk, bytes - start)
+                        if (length <= 0) return@async
+                        val spec = DataSpec.Builder()
+                            .setUri(url)
+                            .setKey(key)
+                            .setPosition(start)
+                            .setLength(length)
+                            .build()
+                        var reported = 0L
+                        val writer = CacheWriter(
+                            StreamCache.dataSourceFactory(cache).createDataSource(),
+                            spec,
+                            null,
+                        ) { _, bytesCached, _ ->
+                            onProgress(done.addAndGet(bytesCached - reported))
+                            reported = bytesCached
+                        }
+                        // Отмена снаружи прерывает поток — писатель на это и рассчитан.
+                        runInterruptible { writer.cache() }
+                    }
+                }.awaitAll()
+            }
+            Unit
         }
+
+    private companion object {
+        const val LANES = 3
+        const val MIN_BYTES_PER_LANE = 32L * 1024 * 1024
+    }
 }

@@ -145,6 +145,13 @@ class FrameEngine(
      */
     private var primedWaiting: String? = null
 
+    /**
+     * Подкачку придерживают, пока на экране ролик потоком: его хвост идёт по
+     * той же сети, и подкачка следующего отбирала бы у него канал.
+     */
+    @Volatile
+    var primingHeld = false
+
     /** Останавливает подкачку — когда движок больше не нужен. */
     fun close() {
         primeScope.cancel()
@@ -456,6 +463,7 @@ class FrameEngine(
     }
 
     private fun startPriming(item: MediaItem) {
+        if (primingHeld) return
         synchronized(primeLock) {
             // Подкачанный ждёт показа — буфер занят им, следующий подождёт.
             if (primedWaiting != null && primedWaiting != item.path) return

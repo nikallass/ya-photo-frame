@@ -688,6 +688,10 @@ class FrameDreamService : DreamService() {
 
         showingVideo = prepared is PreparedVideo
         if (!showingVideo) overlay(showingSound = false)
+        // Хвост потокового ролика идёт по сети прямо сейчас — подкачку
+        // следующего откладываем до смены кадра.
+        engine?.primingHeld = prepared is PreparedVideo &&
+            prepared.delivery is ru.dvedev.me.yaphotoframe.cache.Delivery.Streamed
         // Плеер здесь не останавливаем: пока слой с роликом виден, он держит на
         // поверхности последний кадр. Отпустим его, когда слой уйдёт.
         if (prepared is PreparedVideo) startPlayback(prepared)
