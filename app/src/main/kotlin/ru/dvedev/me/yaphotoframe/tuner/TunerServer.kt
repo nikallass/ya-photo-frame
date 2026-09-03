@@ -41,6 +41,12 @@ class TunerServer(
     private val folders: (String) -> String = { "[]" },
     /** Пересобрать список папок — он собирается редко и неспешно. */
     private val onRescanFolders: () -> Unit = {},
+    /**
+     * Кто поднял страницу: «dream» — заставка, «app» — экран приложения.
+     * Странице это важно: из приложения индекс не строится и показ не идёт,
+     * и подсказывать надо другое.
+     */
+    private val host: String = "dream",
 ) {
 
     private var serverSocket: ServerSocket? = null
@@ -292,6 +298,7 @@ class TunerServer(
 
     private fun json(settings: FrameSettings): String = buildString {
         append('{')
+        append("\"host\":\"").append(host).append("\",")
         append("\"folderUrl\":\"").append(settings.folderUrl.replace("\"", "")).append("\",")
         append("\"showDurationMillis\":").append(settings.showDurationMillis).append(',')
         append("\"crossfadeMillis\":").append(settings.crossfadeMillis).append(',')

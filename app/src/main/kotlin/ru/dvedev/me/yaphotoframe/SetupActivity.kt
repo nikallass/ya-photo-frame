@@ -18,8 +18,14 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import ru.dvedev.me.yaphotoframe.library.FolderIndex
+import ru.dvedev.me.yaphotoframe.library.FolderIndexStore
+import ru.dvedev.me.yaphotoframe.library.LibraryStore
+import ru.dvedev.me.yaphotoframe.media.yandex.YandexPublicDiskSource
 import ru.dvedev.me.yaphotoframe.settings.SettingsStore
 import ru.dvedev.me.yaphotoframe.tuner.TunerServer
+import ru.dvedev.me.yaphotoframe.tuner.foldersJson
+import ru.dvedev.me.yaphotoframe.tuner.jsonEscape
 import ru.dvedev.me.yaphotoframe.ui.FrameSettings
 import ru.dvedev.me.yaphotoframe.ui.GuideView
 import java.io.File
@@ -86,7 +92,14 @@ class SetupActivity : Activity() {
         )
 
         if (store.current.tunerEnabled) {
-            tuner = TunerServer(store, assets).also { it.start() }
+            tuner = TunerServer(
+                store = store,
+                assets = assets,
+                host = "app",
+                diagnostics = ::diagnostics,
+                folders = ::foldersJson,
+                onRescanFolders = ::rescanFolders,
+            ).also { it.start() }
         }
 
         buildHeader()
@@ -119,6 +132,9 @@ class SetupActivity : Activity() {
                     showingDemo = false,
                     donateUrl = Defaults.DONATE_URL,
                     assignStep = true,
+                    // На этом экране подсказка делит место с настройками, но
+                    // целиком должна влезать в экран без прокрутки.
+                    maxHeightPx = resources.displayMetrics.heightPixels - PADDING * 2,
                 )
             )
             container.addView(label("Или настройте прямо здесь, пультом", 20f, TEXT))
@@ -145,6 +161,81 @@ class SetupActivity : Activity() {
             )
         }
         container.addView(label(cacheSummary(), 14f, MUTED))
+    }
+
+    /**
+     * Состояние для страницы, пока заставка не запущена.
+     *
+     * Раньше страница из приложения отвечала на это «не достучался до
+     * телевизора» — из-за чего при первой настройке казалось, что всё сломано.
+     * Индекс здесь читается с диска, без движка, и только если файл менялся.
+     */
+    private var indexSummary: Pair<Long, String>? = null
+
+    private fun diagnostics(): String {
+        val file = File(filesDir, "library.json")
+        val stamp = if (file.isFile) file.lastModified() else 0L
+        val summary = indexSummary?.takeIf { it.first == stamp }?.second ?: run {
+            val snapshot = LibraryStore(file).load()
+            val text = if (snapshot.entries.isEmpty()) "индекс ещё не построен"
+            else "в индексе ${snapshot.entries.size} файлов"
+            indexSummary = stamp to text
+            text
+        }
+        val status = if (store.current.folderUrl.isBlank()) {
+            "Папка не задана. Задайте её здесь, затем назначьте заставку в настройках телевизора."
+        } else {
+            "Заставка сейчас не запущена ($summary). Обход и показ начнутся, когда она включится."
+        }
+        return "{\"index\":{\"total\":0},\"cache\":{\"usedBytes\":0,\"budgetBytes\":0,\"files\":0}," +
+            "\"status\":{\"phase\":\"app\",\"text\":\"" + jsonEscape(status) + "\"}," +
+            "\"queue\":[],\"hourly\":[],\"shows\":0,\"log\":[],\"failures\":[],\"errors\":[]}"
+    }
+
+    /** Дерево папок с того же файла, что и у заставки: раскрытые уровни общие. */
+    private val folderStore by lazy { FolderIndexStore(File(filesDir, "folders.json")) }
+
+    private fun source() = YandexPublicDiskSource(
+        publicKey = store.current.folderUrl,
+        http = Http.client,
+    )
+
+    private fun foldersJson(query: String): String {
+        if (store.current.folderUrl.isBlank()) return foldersJson(emptyList(), 0, 0)
+        val path = query.split('&')
+            .firstOrNull { it.startsWith("path=") }
+            ?.removePrefix("path=")
+            ?.let { java.net.URLDecoder.decode(it, "UTF-8") }
+            ?: "/"
+        return try {
+            var index = folderStore.load()
+            val children = index.childrenOf(path) ?: kotlinx.coroutines.runBlocking {
+                source().subfolders(path)
+            }.also {
+                index = index.withLevel(path, it, System.currentTimeMillis())
+                folderStore.save(index)
+            }
+            foldersJson(children, index.builtAtMillis, index.folders.size)
+        } catch (e: Exception) {
+            Log.w(TAG, "не смог перечислить подпапки «$path»", e)
+            foldersJson(emptyList(), 0, 0)
+        }
+    }
+
+    private fun rescanFolders() {
+        if (store.current.folderUrl.isBlank()) return
+        Thread {
+            runCatching {
+                val folders = kotlinx.coroutines.runBlocking { source().allFolders() }
+                folderStore.save(
+                    FolderIndex(
+                        builtAtMillis = System.currentTimeMillis(),
+                        folders = folders,
+                        scanned = folders.mapTo(mutableSetOf("/")) { it.path },
+                    ),
+                )
+            }.onFailure { Log.w(TAG, "не собрал список папок", it) }
+        }.start()
     }
 
     /** Занятость кэша считается прямо по директории: движок здесь не запущен. */

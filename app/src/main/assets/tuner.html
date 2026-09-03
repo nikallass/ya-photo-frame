@@ -43,6 +43,13 @@
   .name { font-size: 15px; }
   .value { color: var(--accent); font-variant-numeric: tabular-nums; font-size: 15px; }
   .note { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .banner { background: #241f14; border: 1px solid var(--accent); color: var(--accent);
+            border-radius: 12px; padding: 14px 16px; margin-bottom: 12px;
+            font-size: 17px; font-weight: 600; line-height: 1.35; }
+  .banner small { display: block; font-weight: 400; font-size: 13px; margin-top: 4px; opacity: .85; }
+  .banner[hidden] { display: none; }
+  .statusline { font-size: 16px; color: var(--text); }
+  .statusline.busy { color: var(--accent); }
   .right { display: flex; align-items: center; gap: 10px; }
   /* Не кнопка, а значок: рамка и фон рядом с каждым значением утяжеляли страницу. */
   .undo { width: auto; margin: 0; padding: 0 2px; font-size: 17px; line-height: 1;
@@ -58,17 +65,17 @@
            background: var(--card); color: var(--text);
            border: 1px solid var(--line); border-radius: 12px; }
   button:active { background: #262b36; }
-  #install { position: fixed; inset: 0; background: rgba(10,11,15,.92); z-index: 10;
+  #install, #assign { position: fixed; inset: 0; background: rgba(10,11,15,.92); z-index: 10;
               display: flex; align-items: center; justify-content: center; padding: 18px; }
   /* Правило по идентификатору сильнее браузерного [hidden]{display:none}, и без
      этой строки окошко не закрывалось: атрибут ставился, а display оставался
      flex. */
-  #install[hidden] { display: none; }
-  #install .sheet { background: var(--card); border: 1px solid var(--line);
+  #install[hidden], #assign[hidden] { display: none; }
+  #install .sheet, #assign .sheet { background: var(--card); border: 1px solid var(--line);
                     border-radius: 16px; padding: 20px; max-width: 460px; max-height: 88vh;
                     overflow: auto; }
-  #install h2 { font-size: 18px; margin: 0 0 8px; }
-  #install p { color: var(--muted); font-size: 14px; margin: 6px 0 0; }
+  #install h2, #assign h2 { font-size: 18px; margin: 0 0 8px; }
+  #install p, #assign p { color: var(--muted); font-size: 14px; margin: 6px 0 0; }
   #install .os { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
   #install .os b { font-size: 15px; }
   #install .os.dim { opacity: .45; }
@@ -119,7 +126,7 @@
     <div class="head"><span class="name">Папка на Яндекс.Диске</span></div>
     <div class="note">публичная ссылка; смена папки сбрасывает индекс и кэш</div>
     <input type="text" id="folder" autocapitalize="off" autocorrect="off" spellcheck="false">
-    <button id="savefolder">Сменить папку</button>
+    <button id="savefolder">Задать папку</button>
   </div>
   <div id="toggles"></div>
   <div id="rows"></div>
@@ -130,6 +137,7 @@
   <div class="hint">Отметьте папки, которые показывать. Отмеченная включает и всё
     вложенное. Не отмечено ничего — показывается вся директория целиком.</div>
   <div class="hint" id="folderage"></div>
+  <div class="banner" id="indexbanner" hidden></div>
   <div class="treebar">
     <button class="small" id="expandall">⊞ Развернуть всё</button>
     <button class="small" id="collapseall">⊟ Свернуть всё</button>
@@ -149,6 +157,10 @@
 </div>
 
 <div id="state" hidden>
+  <div class="row">
+    <div class="name">Сейчас</div>
+    <div class="statusline" id="statusline">…</div>
+  </div>
   <div class="row">
     <div class="name">Библиотека</div>
     <div id="index"></div>
@@ -208,6 +220,17 @@
       <p>Добавьте страницу в закладки — Ctrl+D или Cmd+D.</p>
     </div>
     <button id="installok">Понятно</button>
+  </div>
+</div>
+
+<div id="assign" hidden>
+  <div class="sheet">
+    <h2>Папка задана</h2>
+    <p>Теперь на телевизоре: <b>Настройки → Заставка → «Фоторамка»</b>. Там же
+      задаётся, через сколько минут простоя она включается.</p>
+    <p>Обход папки и показ начнутся при первом запуске заставки. Ход обхода будет
+      виден здесь, на вкладках «Папки» и «Состояние».</p>
+    <button id="assignok">Понятно</button>
   </div>
 </div>
 
@@ -404,13 +427,27 @@ async function send() {
 
 document.getElementById('savefolder').addEventListener('click', async () => {
   const url = document.getElementById('folder').value.trim();
-  if (!url || !confirm('Индекс и кэш прежней папки будут удалены. Меняем?')) return;
-  status.textContent = 'меняю папку…';
+  if (!url) return;
+  // Первое задание папки ничего не стирает — подтверждать нечего.
+  const initial = !state.folderUrl;
+  if (!initial && !confirm('Индекс и кэш прежней папки будут удалены. Меняем?')) return;
+  status.textContent = 'задаю папку…';
   const res = await fetch('/api/settings', { method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: 'folderUrl=' + encodeURIComponent(url) });
   render(await res.json());
-  status.textContent = 'папка сменена, рамка начинает заново';
+  if (state.host === 'app') {
+    // Страница поднята приложением, а не заставкой: показывать пока некому,
+    // и владельцу надо назначить заставку — иначе непонятно, что дальше.
+    status.textContent = 'папка задана';
+    document.getElementById('assign').hidden = false;
+  } else {
+    status.textContent = initial ? 'папка задана, рамка начинает обход' : 'папка сменена, рамка начинает заново';
+    watchIndexing();
+  }
+});
+document.getElementById('assignok').addEventListener('click', () => {
+  document.getElementById('assign').hidden = true;
 });
 
 document.getElementById('reset').addEventListener('click', async () => {
@@ -585,7 +622,12 @@ async function applyFolders() {
   render(await res.json());
   appliedSelection = selectionKey();
   updateApplyBar();
-  status.textContent = 'отбор применён, рамка обходит папку заново';
+  if (state.host === 'app') {
+    status.textContent = 'отбор сохранён; обход пойдёт при запуске заставки';
+  } else {
+    status.textContent = 'отбор применён, рамка перечитывает папки…';
+    watchIndexing();
+  }
 }
 document.getElementById('applyfolders').addEventListener('click', applyFolders);
 document.getElementById('applyfloat').addEventListener('click', applyFolders);
@@ -620,6 +662,67 @@ for (const tab of document.querySelectorAll('.tab')) {
   });
 }
 
+// ── чем рамка занята ───────────────────────────────────────────────────────
+
+// Обход большой папки — минуты, и без счётчика кажется, что всё повисло:
+// на одном снимке, с пустым деревом папок. Поэтому статус спрашивается
+// постоянно, а пока идёт обход — чаще, и показывается везде, где ждут.
+let lastStatus = null;
+const mmss = ms => { const s = Math.max(0, Math.round(ms / 1000));
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+
+function paintStatus(d) {
+  const st = d.status || {}, ix = d.index && d.index.indexing;
+  lastStatus = st.phase || null;
+  const line = document.getElementById('statusline');
+  line.textContent = st.text || '…';
+  line.classList.toggle('busy', st.phase === 'indexing' || st.phase === 'folders');
+
+  const banner = document.getElementById('indexbanner');
+  if (ix) {
+    const elapsed = Date.now() - ix.startedAt;
+    let eta = '';
+    if (ix.expectedFiles > ix.files && ix.files > 0 && elapsed > 5000) {
+      eta = ' · осталось примерно ' + mmss(elapsed * (ix.expectedFiles - ix.files) / ix.files);
+    } else if (!ix.expectedFiles) {
+      eta = ' · сколько всего файлов, заранее неизвестно — это первый обход';
+    }
+    banner.innerHTML = 'Идёт обход папок — подождите завершения' +
+      '<small>' + ix.files + ' файлов в ' + ix.folders + ' папках · прошло ' + mmss(elapsed) + eta +
+      '. Дерево ниже можно раскрывать и отмечать уже сейчас.</small>';
+    banner.hidden = false;
+  } else if (st.phase === 'folders') {
+    banner.innerHTML = 'Собираю дерево папок целиком<small>это долго, но нужно редко</small>';
+    banner.hidden = false;
+  } else {
+    banner.hidden = true;
+  }
+}
+
+let statusTimer = null;
+async function pollStatus() {
+  try {
+    const d = await (await fetch('/api/state')).json();
+    paintStatus(d);
+    if (d.status && d.status.phase === 'idle' && watching) {
+      watching = false;
+      status.textContent = 'готово: ' + d.status.text.replace(/^Работает штатно: /, '');
+    }
+  } catch (e) { /* телевизор занят или спит — попробуем в следующий раз */ }
+  clearTimeout(statusTimer);
+  const busy = lastStatus === 'indexing' || lastStatus === 'folders' || watching;
+  statusTimer = setTimeout(pollStatus, busy ? 3000 : 15000);
+}
+
+// Владелец что-то запустил и ждёт: опрашивать чаще, сообщить, когда кончится.
+let watching = false;
+function watchIndexing() {
+  watching = true;
+  clearTimeout(statusTimer);
+  statusTimer = setTimeout(pollStatus, 1500);
+}
+pollStatus();
+
 const bytes = n => n >= 1073741824 ? (n / 1073741824).toFixed(2) + ' ГБ'
   : n >= 1048576 ? (n / 1048576).toFixed(1) + ' МБ' : Math.round(n / 1024) + ' КБ';
 const kv = (k, v) => '<div class="kv"><span>' + k + '</span><span>' + v + '</span></div>';
@@ -631,6 +734,7 @@ const escapeHtml = s => s.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&
 async function loadState() {
   try {
     const d = await (await fetch('/api/state')).json();
+    paintStatus(d);
     const i = d.index, c = d.cache;
     document.getElementById('index').innerHTML =
       kv('всего файлов', i.total) + kv('фотографий', i.photos) + kv('видео', i.videos) +

@@ -289,7 +289,19 @@ class FrameDreamService : DreamService() {
                     http = Http.client,
                     selection = { FolderSelection.of(store.current.selectedFolders) },
                     onProgress = { files, folders ->
-                        indexing = if (folders < 0) null else Indexing(files, folders)
+                        indexing = if (folders < 0) {
+                            null
+                        } else {
+                            val started = indexing
+                            Indexing(
+                                files = files,
+                                folders = folders,
+                                startedAtMillis = started?.startedAtMillis ?: System.currentTimeMillis(),
+                                // Прошлый размер индекса — единственная опора для
+                                // оценки: сколько всего файлов, заранее неизвестно.
+                                expectedFiles = started?.expectedFiles ?: (engine?.entries?.size ?: 0),
+                            )
+                        }
                     },
                 ),
                 store = LibraryStore(File(filesDir, LIBRARY_FILE)),
@@ -390,10 +402,34 @@ class FrameDreamService : DreamService() {
     }
 
     /** Идущий обход: сколько файлов и папок пройдено. Null — обход не идёт. */
-    private class Indexing(val files: Int, val folders: Int)
+    private class Indexing(
+        val files: Int,
+        val folders: Int,
+        val startedAtMillis: Long,
+        val expectedFiles: Int,
+    )
 
     @Volatile
     private var indexing: Indexing? = null
+
+    @Volatile
+    private var rescanningFolders = false
+
+    /** Одной строкой: чем рамка сейчас занята. */
+    private fun statusJson(): String {
+        val index = engine?.indexState()
+        val running = indexing
+        val (phase, text) = when {
+            running != null -> "indexing" to
+                "Идёт обход папки: ${running.files} файлов в ${running.folders} папках"
+            rescanningFolders -> "folders" to "Собираю дерево папок"
+            index == null || index.total == 0 -> "empty" to "Индекс ещё не построен"
+            else -> "idle" to "Работает штатно: индекс построен, ${index.total} файлов, " +
+                "обход " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+                    .format(java.util.Date(index.syncedAtMillis))
+        }
+        return "{\"phase\":\"$phase\",\"text\":\"${escape(text)}\"}"
+    }
 
     /** Крупная подсказка вместо чёрного экрана, когда показывать нечего. */
     private fun showGuide() {
@@ -565,13 +601,16 @@ class FrameDreamService : DreamService() {
                 folders = ::foldersJson,
                 onRescanFolders = {
                     scope.launch {
+                        rescanningFolders = true
                         runCatching {
                             Diary.note("собираю список папок")
                             val found = engine?.rebuildFolderIndex() ?: 0
                             Diary.note("список папок собран: $found")
                         }.onFailure { Diary.problem("не собрал список папок", it) }
+                        rescanningFolders = false
                     }
                 },
+                host = "dream",
                 onRefresh = {
                     scope.launch {
                         runCatching { engine?.sync()?.let(::report) }
@@ -635,9 +674,13 @@ class FrameDreamService : DreamService() {
             // на большом Диске это минуты, и без счётчика кажется, что рамка
             // повисла на одном снимке.
             append("\"indexing\":").append(
-                indexing?.let { "{\"files\":${it.files},\"folders\":${it.folders}}" } ?: "null",
+                indexing?.let {
+                    "{\"files\":${it.files},\"folders\":${it.folders}," +
+                        "\"startedAt\":${it.startedAtMillis},\"expectedFiles\":${it.expectedFiles}}"
+                } ?: "null",
             )
             append("},")
+            append("\"status\":").append(statusJson()).append(',')
             append("\"cache\":{")
             append("\"usedBytes\":").append(cache?.usedBytes ?: 0).append(',')
             append("\"budgetBytes\":").append(cache?.budgetBytes ?: 0).append(',')

@@ -31,7 +31,54 @@ class GuideView(
      * непонятно, что делать дальше, а внутри заставки он был бы лишним.
      */
     assignStep: Boolean = false,
+    /** Предел высоты, когда родитель его не задаёт (например, внутри прокрутки). */
+    private val maxHeightPx: Int = 0,
 ) : LinearLayout(context) {
+
+    /** Во сколько раз текст ужат, чтобы влезть; единица — как задумано. */
+    private var textScale = 1f
+    private val baseTextSizes = HashMap<TextView, Float>()
+
+    /**
+     * Ужимает текст, пока он не влезет в отведённую высоту.
+     *
+     * Телевизоры срезают до пяти процентов картинки по краям, разрешения и
+     * шрифты разные, а подсказка с обрезанной последней строкой выглядит
+     * поломкой. Проще подогнать текст, чем угадывать запас.
+     */
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val mode = MeasureSpec.getMode(heightMeasureSpec)
+        var limit = if (mode == MeasureSpec.UNSPECIFIED) maxHeightPx else MeasureSpec.getSize(heightMeasureSpec)
+        if (limit > 0) limit -= SAFE_MARGIN * 2
+        var spec = heightMeasureSpec
+        if (mode == MeasureSpec.UNSPECIFIED && maxHeightPx > 0) {
+            spec = MeasureSpec.makeMeasureSpec(maxHeightPx, MeasureSpec.AT_MOST)
+        }
+        super.onMeasure(widthMeasureSpec, spec)
+        if (limit <= 0) return
+
+        var attempts = 0
+        while (steps.measuredHeight + paddingTop + paddingBottom > limit &&
+            textScale > MIN_TEXT_SCALE && attempts++ < 6
+        ) {
+            val needed = (steps.measuredHeight + paddingTop + paddingBottom).toFloat()
+            textScale = (textScale * limit / needed * 0.98f).coerceAtLeast(MIN_TEXT_SCALE)
+            applyTextScale()
+            super.onMeasure(widthMeasureSpec, spec)
+        }
+    }
+
+    private fun applyTextScale() {
+        for ((view, base) in baseTextSizes) {
+            view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, base * textScale)
+        }
+    }
+
+    private fun TextView.sized(sp: Float): TextView {
+        baseTextSizes[this] = sp
+        textSize = sp * textScale
+        return this
+    }
 
     private val steps = LinearLayout(context).apply {
         orientation = VERTICAL
@@ -79,7 +126,7 @@ class GuideView(
         steps.addView(
             step(3, "На Яндекс.Диске сделайте папку с фото общедоступной и скопируйте ссылку.")
         )
-        steps.addView(step(4, "Вставьте её на вкладке «Настройка» и нажмите «Сменить папку»."))
+        steps.addView(step(4, "Вставьте её на вкладке «Настройка» и нажмите «Задать папку»."))
         if (assignStep) {
             steps.addView(
                 step(5, "Назначьте заставку: Настройки телевизора → Заставка → «Фоторамка»."),
@@ -138,7 +185,7 @@ class GuideView(
 
     private fun title(text: String) = TextView(context).apply {
         this.text = text
-        textSize = 36f
+        sized(36f)
         setTextColor(TEXT)
         setTypeface(typeface, Typeface.BOLD)
         setPadding(0, 0, 0, GAP)
@@ -146,21 +193,21 @@ class GuideView(
 
     private fun subtitle(text: String) = TextView(context).apply {
         this.text = text
-        textSize = 19f
+        sized(19f)
         setTextColor(MUTED)
         setPadding(0, 0, 0, GAP * 2)
     }
 
     private fun step(number: Int, text: String) = TextView(context).apply {
         this.text = "$number.   $text"
-        textSize = 21f
+        sized(21f)
         setTextColor(TEXT)
         setPadding(0, GAP / 2, 0, GAP / 2)
     }
 
     private fun accent(text: String) = TextView(context).apply {
         this.text = text
-        textSize = 30f
+        sized(30f)
         setTextColor(ACCENT)
         setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
         setPadding(STEP_INDENT, GAP / 2, 0, GAP)
@@ -168,7 +215,7 @@ class GuideView(
 
     private fun note(text: String) = TextView(context).apply {
         this.text = text
-        textSize = 16f
+        sized(16f)
         setTextColor(MUTED)
         setPadding(0, GAP * 2, 0, 0)
     }
@@ -185,5 +232,9 @@ class GuideView(
         const val QR_SIZE = 340
         const val DONATE_QR_SIZE = 115
         const val QR_PADDING = 24
+
+        /** Пять процентов высоты Full HD: столько телевизоры срезают по краю. */
+        const val SAFE_MARGIN = 54
+        const val MIN_TEXT_SCALE = 0.55f
     }
 }
