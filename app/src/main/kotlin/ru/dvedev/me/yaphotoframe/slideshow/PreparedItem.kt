@@ -2,6 +2,8 @@ package ru.dvedev.me.yaphotoframe.slideshow
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
+import android.os.Build
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import ru.dvedev.me.yaphotoframe.cache.Delivery
@@ -52,8 +54,8 @@ class PreparedPhoto(
 /**
  * Ролик: постер-кадр под фон и то, откуда его брать.
  *
- * Само содержимое не загружается заранее — тяжёлые ролики играются потоком, а
- * лёгкие уже лежат в кэше.
+ * Само содержимое здесь не читается: ролик либо уже лежит на диске, либо
+ * пойдёт потоком.
  */
 class PreparedVideo(
     override val item: MediaItem,
@@ -86,12 +88,15 @@ class FramePreparer(
         val background = backgroundFor(item)
         try {
             when (item.kind) {
-                MediaKind.VIDEO -> PreparedVideo(
-                    item = item,
-                    background = background,
-                    poster = decode(previewFile(item, PreviewSize.FULL)),
-                    delivery = deliver(item),
-                )
+                MediaKind.VIDEO -> {
+                    val delivery = deliver(item)
+                    PreparedVideo(
+                        item = item,
+                        background = background,
+                        poster = posterFor(item, delivery),
+                        delivery = delivery,
+                    )
+                }
                 MediaKind.PHOTO -> PreparedPhoto(
                     item = item,
                     frame = decodePhoto(previewFile(item, PreviewSize.FULL)),
@@ -116,6 +121,48 @@ class FramePreparer(
             companion = second.frame,
             companionItem = second.item,
         )
+    }
+
+    /**
+     * Постер — ровно первый кадр ролика, когда файл под рукой.
+     *
+     * Копия с Диска снята где-то с первой секунды, а плеер начинает с нуля:
+     * постер сменялся первым кадром с заметным «откатом» назад. Свой первый
+     * кадр совпадает с тем, с чего начнёт плеер, и подмены не видно. Если
+     * файла нет или кадр не достался — копия с Диска, как раньше.
+     */
+    private suspend fun posterFor(item: MediaItem, delivery: Delivery): Bitmap {
+        if (delivery is Delivery.Local) firstFrame(delivery.file)?.let { return it }
+        return decode(previewFile(item, PreviewSize.FULL))
+    }
+
+    private fun firstFrame(file: File): Bitmap? {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(file.path)
+            val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+                ?.toIntOrNull() ?: 0
+            val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+                ?.toIntOrNull() ?: 0
+            // Кадр 4K целиком — тридцать мегабайт битмапа; на экран в любом
+            // случае идёт не больше его ширины.
+            val scale = minOf(1f, POSTER_LONG_SIDE.toFloat() / maxOf(width, height, 1))
+            val frame = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 && width > 0 && height > 0) {
+                retriever.getScaledFrameAtTime(
+                    0L,
+                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                    maxOf(1, (width * scale).toInt()),
+                    maxOf(1, (height * scale).toInt()),
+                )
+            } else {
+                retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            }
+            frame?.also { it.prepareToDraw() }
+        } catch (e: Exception) {
+            null
+        } finally {
+            retriever.release()
+        }
     }
 
     private suspend fun backgroundFor(item: MediaItem): Bitmap {
@@ -148,4 +195,9 @@ class FramePreparer(
             ?: throw IOException("не удалось декодировать ${file.name}"))
             // Загрузка в GPU идёт заранее, а не на первом кадре растворения.
             .also { it.prepareToDraw() }
+
+    private companion object {
+        /** Длиннее экрана постеру быть незачем. */
+        const val POSTER_LONG_SIDE = 1920
+    }
 }

@@ -36,12 +36,18 @@ class VideoPlayback(private val context: Context) {
         onEnded: () -> Unit,
         onFailed: (Throwable) -> Unit,
         onSizeKnown: (Int, Int) -> Unit,
-        onFirstFrame: () -> Unit,
+        /**
+         * Ролик пошёл: кадры сменяются. Именно пошёл, а не отрисовал первый
+         * кадр — между ними плеер набирает буфер, и снятый в этот момент постер
+         * открывал застывший кадр на несколько секунд.
+         */
+        onPlaying: () -> Unit,
         /** Ролик встал на подкачку уже после старта — владелец это видит как заикание. */
         onStalled: () -> Unit = {},
     ) {
         stop()
         var started = false
+        var playing = false
 
         val uri = when (delivery) {
             is Delivery.Local -> Uri.fromFile(delivery.file)
@@ -61,7 +67,13 @@ class VideoPlayback(private val context: Context) {
 
                 override fun onRenderedFirstFrame() {
                     started = true
-                    onFirstFrame()
+                }
+
+                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    if (isPlaying && !playing) {
+                        playing = true
+                        onPlaying()
+                    }
                 }
 
                 override fun onVideoSizeChanged(size: VideoSize) {

@@ -391,16 +391,60 @@ class FrameEngineTest {
     }
 
     @Test
-    fun `тяжёлое видео не занимает место, а отдаётся потоком`() = runTest {
+    fun `тяжёлый ролик качается заранее в фоне и выходит на экран только с диска`() = runTest {
         switchToCacheFolder()
         val engine = library(pageLimit = 50, includeVideo = true)
         engine.sync()
 
-        val huge = engine.entries.single { it.item.name == "огромное.mov" }.item
-        val light = engine.entries.single { it.item.name == "лёгкое.mp4" }.item
+        // Пока не скачан — стоит в очереди, но показ идёт мимо него.
+        val shownBefore = List(4) { checkNotNull(engine.advance()).name }
+        assertTrue("на экран не идёт: $shownBefore", "огромное.mov" !in shownBefore)
+        val queued = engine.upcoming().map { it.name }
+        assertTrue("тяжёлый ролик ждёт в очереди: $queued", "огромное.mov" in queued)
+        assertTrue("и в кэше его нет", cachedNames().none { it.endsWith("-orig") })
 
-        assertTrue("шесть гигабайт мимо кэша", engine.deliver(huge) is Delivery.Streamed)
+        engine.prefetch()
+        engine.awaitHeavy()
+
+        val heavyNames = heavyDirectory.listFiles().orEmpty().map { it.name }
+        assertEquals("лежит отдельно от кэша: $heavyNames", 1, heavyNames.size)
+        val state = engine.cacheState()
+        assertEquals("учтён отдельно", BYTES_PER_ORIGINAL.toLong(), state.heavyBytes)
+        assertEquals(
+            "и в занятость общего кэша не входит",
+            cacheDirectory.listFiles().orEmpty().filter { it.isFile }.sumOf { it.length() },
+            state.usedBytes,
+        )
+        assertTrue("общий кэш без оригиналов", cachedNames().none { it.endsWith("-orig") })
+
+        val shownAfter = buildList { repeat(12) { engine.advance()?.let { add(it.name) } } }
+        assertTrue("скачанный ролик вышел на экран: $shownAfter", "огромное.mov" in shownAfter)
+        val huge = engine.entries.single { it.item.name == "огромное.mov" }.item
+        assertTrue("и играет с диска", engine.deliver(huge) is Delivery.Local)
+        assertEquals("неудач нет: " + engine.failed, 0, engine.failed.size)
+    }
+
+    @Test
+    fun `лёгкий ролик оседает в общем кэше`() = runTest {
+        switchToCacheFolder()
+        val engine = library(pageLimit = 50, includeVideo = true)
+        engine.sync()
+
+        val light = engine.entries.single { it.item.name == "лёгкое.mp4" }.item
         assertTrue("двадцать мегабайт оседают на устройстве", engine.deliver(light) is Delivery.Local)
+        assertTrue("в общем кэше", cachedNames().any { it.endsWith("-orig") })
+    }
+
+    @Test
+    fun `тяжёлый ролик, для которого нет места, в очередь не берётся`() = runTest {
+        switchToCacheFolder()
+        val engine = library(pageLimit = 50, includeVideo = true, freeBytes = { 0L })
+        engine.sync()
+
+        val queued = engine.upcoming().map { it.name }
+        assertTrue("в очереди его нет: $queued", "огромное.mov" !in queued)
+        val huge = engine.entries.single { it.item.name == "огромное.mov" }.item
+        assertTrue("а причина видна: " + engine.failed, engine.failed[huge.path]?.contains("места") == true)
     }
 
     @Test
@@ -724,6 +768,7 @@ class FrameEngineTest {
         measure: (MediaItem, File) -> Int? = { _, _ -> null },
         tuning: PlaylistTuning = PlaylistTuning(),
         selection: () -> FolderSelection = { FolderSelection.ALL },
+        freeBytes: () -> Long = { Long.MAX_VALUE },
     ) = FrameEngine(
         source = YandexPublicDiskSource(
             publicKey = "https://disk.yandex.ru/d/TEST",
@@ -737,6 +782,9 @@ class FrameEngineTest {
         folderStore = FolderIndexStore(File(cacheDirectory, "folders.json")),
         cache = cache(),
         fetcher = MediaFetcher(OkHttpClient(), cache()),
+        heavyCache = heavyCache(),
+        heavyFetcher = MediaFetcher(OkHttpClient(), heavyCache()),
+        freeBytes = freeBytes,
         policy = { policy },
         clock = { now },
         random = Random(seed),
@@ -748,13 +796,17 @@ class FrameEngineTest {
 
     private fun cache() = MediaCache(cacheDirectory, { policy.budgetBytes }, { now })
 
+    private val heavyDirectory: File by lazy { File(cacheDirectory, "heavy") }
+
+    private fun heavyCache() = MediaCache(heavyDirectory, { Long.MAX_VALUE }, { now })
+
     private fun switchToCacheFolder() {
         available.clear()
         available["/"] = listOf("cache-root-0.json")
     }
 
     private fun cachedNames(): List<String> =
-        cacheDirectory.listFiles().orEmpty().map { it.name }.sorted()
+        cacheDirectory.listFiles().orEmpty().filter { it.isFile }.map { it.name }.sorted()
 
     /** Переключает подставное хранилище на большую папку: 15 давних снимков и 5 свежих. */
     private fun switchToBulkFolder() {

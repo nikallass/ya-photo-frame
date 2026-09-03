@@ -262,7 +262,7 @@ const FIELDS = [
     min: 0, max: 120, step: 1, get: v => Math.round(v / 60000), set: s => s * 60000,
     show: v => v ? Math.round(v / 60000) + ' мин' : 'пока не снимут' },
 
-  { key: 'videoMaxSizeBytes', name: 'Ролик не тяжелее', note: 'тяжелее порога кэша ролик идёт потоком, а тяжёлый поток заикается на Wi-Fi; 0 — без ограничения',
+  { key: 'videoMaxSizeBytes', name: 'Ролик не тяжелее', note: 'что тяжелее — не показывается вовсе; 0 — без ограничения, лишь бы хватило места на телевизоре',
     min: 0, max: 4096, step: 64, get: v => Math.round(v / 1048576), set: s => s * 1048576,
     show: v => !v ? 'без ограничения' : v >= 1073741824 ? (v / 1073741824).toFixed(1) + ' ГБ' : Math.round(v / 1048576) + ' МБ' },
 
@@ -336,7 +336,7 @@ const FIELDS = [
     get: v => Math.round(v / 1048576), set: s => s * 1048576,
     show: v => v >= 1073741824 ? (v / 1073741824).toFixed(1) + ' ГБ' : Math.round(v / 1048576) + ' МБ' },
 
-  { key: 'cacheItemThresholdBytes', name: 'Порог кэширования', note: 'что тяжелее — играется потоком',
+  { key: 'cacheItemThresholdBytes', name: 'Порог тяжёлого ролика', note: 'что легче — ложится в общий кэш; что тяжелее — качается отдельно, по одному, и показывается, когда скачан целиком',
     min: 1, max: 2048, step: 1,
     get: v => Math.round(v / 1048576), set: s => s * 1048576,
     show: v => Math.round(v / 1048576) + ' МБ' },
@@ -811,8 +811,12 @@ async function loadState() {
       kv('нечем показать', i.unshowable) + kv('мельче порога', i.tooSmall) + kv('показано хоть раз', i.shown) +
       kv('последний обход', i.syncedAt ? new Date(i.syncedAt).toLocaleString('ru-RU') : 'не было') +
       (d.indexing ? kv('идёт обход', d.indexing.files + ' файлов в ' + d.indexing.folders + ' папках…') : '');
+    const dl = c.download;
     document.getElementById('cache').innerHTML =
-      kv('занято', bytes(c.usedBytes)) + kv('из', bytes(c.budgetBytes)) + kv('файлов', c.files);
+      kv('занято', bytes(c.usedBytes)) + kv('из', bytes(c.budgetBytes)) + kv('файлов', c.files) +
+      (c.heavyFiles ? kv('тяжёлых роликов отдельно', c.heavyFiles + ' на ' + bytes(c.heavyBytes)) : '') +
+      (dl ? kv('качается заранее', dl.name + ' — ' + bytes(dl.doneBytes) + ' из ' + bytes(dl.sizeBytes) +
+        (dl.sizeBytes ? ' (' + Math.round(dl.doneBytes / dl.sizeBytes * 100) + ' %)' : '')) : '');
     document.getElementById('cachebar').style.width =
       Math.min(100, c.budgetBytes ? c.usedBytes / c.budgetBytes * 100 : 0) + '%';
 

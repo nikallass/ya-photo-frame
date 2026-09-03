@@ -20,6 +20,7 @@ import ru.dvedev.me.yaphotoframe.cache.MediaFetcher
 import ru.dvedev.me.yaphotoframe.diag.Diary
 import ru.dvedev.me.yaphotoframe.diag.ShowStats
 import ru.dvedev.me.yaphotoframe.engine.FrameEngine
+import ru.dvedev.me.yaphotoframe.engine.HeavyEvent
 import ru.dvedev.me.yaphotoframe.engine.PlaylistTuning
 import ru.dvedev.me.yaphotoframe.engine.PrefetchOutcome
 import ru.dvedev.me.yaphotoframe.library.FolderIndexStore
@@ -170,6 +171,7 @@ class FrameDreamService : DreamService() {
 
     override fun onDestroy() {
         scope.cancel()
+        engine?.close()
         Log.d(TAG, "сервис уничтожен")
         super.onDestroy()
     }
@@ -257,9 +259,11 @@ class FrameDreamService : DreamService() {
     private fun switchFolder(url: String) {
         Diary.note("папка сменилась, начинаю заново")
         slideshowJob?.cancel()
+        engine?.close()
         engine = null
         File(filesDir, LIBRARY_FILE).delete()
         File(cacheDir, CACHE_DIRECTORY).deleteRecursively()
+        File(cacheDir, HEAVY_DIRECTORY).deleteRecursively()
         slideshowView?.clear()
         startSlideshow()
     }
@@ -290,6 +294,12 @@ class FrameDreamService : DreamService() {
                 directory = File(cacheDir, CACHE_DIRECTORY),
                 budgetBytes = { store.current.cacheBudgetBytes },
             )
+            // Тяжёлым роликам бюджет не писан: их прибирает сам движок, когда
+            // они показаны, а держит не больше двух.
+            val heavyCache = MediaCache(
+                directory = File(cacheDir, HEAVY_DIRECTORY),
+                budgetBytes = { Long.MAX_VALUE },
+            )
             // Движок при создании читает индекс с диска — на большой библиотеке
             // это четыре мегабайта JSON и почти три секунды. Делать это на
             // главном потоке значило бы замереть на старте заставки.
@@ -319,6 +329,9 @@ class FrameDreamService : DreamService() {
                 folderStore = FolderIndexStore(File(filesDir, FOLDERS_FILE)),
                 cache = cache,
                 fetcher = MediaFetcher(Http.client, cache),
+                heavyCache = heavyCache,
+                heavyFetcher = MediaFetcher(Http.client, heavyCache),
+                onHeavy = ::reportHeavy,
                 policy = { store.current.cachePolicy() },
                 includeVideo = { store.current.showVideo },
                 minPhotoLongSide = ::minPhotoLongSide,
@@ -333,6 +346,8 @@ class FrameDreamService : DreamService() {
                 },
                 )
             }
+            // Прежний движок мог качать тяжёлый ролик — ему пора остановиться.
+            this.engine?.close()
             this.engine = engine
             activeFolderUrl = store.current.folderUrl
             activeSelection = store.current.selectedFolders
@@ -691,7 +706,13 @@ class FrameDreamService : DreamService() {
             onSizeKnown = { width, height ->
                 slideshowView?.fitVideo(width, height, store.current.frameInset)
             },
-            onFirstFrame = { slideshowView?.hideVideoPoster() },
+            onPlaying = {
+                slideshowView?.hideVideoPoster()
+                // Длительность — в дневник: ролик с фотоаппарата на десять
+                // секунд весит как фильм, и без неё кажется, что он оборвался.
+                val seconds = playback.durationMillis() / 1000
+                if (seconds > 0) Diary.note("ролик ${prepared.item.name} пошёл, ${formatSeconds(seconds)}")
+            },
             onStalled = {
                 stalls++
                 if (stalls < STALLS_TO_SKIP) {
@@ -806,7 +827,17 @@ class FrameDreamService : DreamService() {
             append("\"cache\":{")
             append("\"usedBytes\":").append(cache?.usedBytes ?: 0).append(',')
             append("\"budgetBytes\":").append(cache?.budgetBytes ?: 0).append(',')
-            append("\"files\":").append(cache?.files ?: 0)
+            append("\"files\":").append(cache?.files ?: 0).append(',')
+            append("\"heavyBytes\":").append(cache?.heavyBytes ?: 0).append(',')
+            append("\"heavyFiles\":").append(cache?.heavyFiles ?: 0).append(',')
+            // Что качается заранее: гигабайтный ролик едет минуты, и без
+            // счётчика непонятно, почему он всё не показывается.
+            append("\"download\":").append(
+                engine?.heavyState()?.let {
+                    "{\"name\":\"${escape(it.item.name)}\",\"sizeBytes\":${it.item.sizeBytes}," +
+                        "\"doneBytes\":${it.doneBytes},\"startedAt\":${it.startedAtMillis}}"
+                } ?: "null",
+            )
             append("},")
             append("\"queue\":").append(
                 jsonArray(engine?.let { kotlinx.coroutines.runBlocking { it.upcoming() } }?.map { it.name }.orEmpty()),
@@ -837,11 +868,32 @@ class FrameDreamService : DreamService() {
     private fun reportPrefetch(outcome: PrefetchOutcome) {
         val state = engine?.cacheState() ?: return
         Diary.note(
-            "подготовка: положено ${outcome.fetched}, потоком ${outcome.streamed}, " +
+            "подготовка: положено ${outcome.fetched}, тяжёлых ${outcome.heavy}, " +
                 "вытеснено ${outcome.evicted}; кэш ${state.usedBytes / 1024 / 1024} МБ " +
                 "в ${state.files} файлах из ${state.budgetBytes / 1024 / 1024} МБ",
         )
     }
+
+    /** Закачка тяжёлого ролика — в дневник: по ней видно и канал, и почему ролик ждёт. */
+    private fun reportHeavy(event: HeavyEvent) {
+        when (event) {
+            is HeavyEvent.Started ->
+                Diary.note("ролик ${event.item.name}: качаю заранее, ${event.item.sizeBytes / 1_048_576} МБ")
+            is HeavyEvent.Finished -> {
+                val seconds = maxOf(1L, event.tookMillis / 1000)
+                val speed = event.bytes / 1_048_576.0 / seconds
+                Diary.note(
+                    "ролик ${event.item.name} скачан за ${formatSeconds(seconds)}, " +
+                        "${"%.1f".format(speed)} МБ/с",
+                )
+            }
+            is HeavyEvent.Failed ->
+                Diary.problem("ролик ${event.item.name} не скачался: ${event.reason}")
+        }
+    }
+
+    private fun formatSeconds(seconds: Long): String =
+        if (seconds < 60) "$seconds с" else "${seconds / 60} мин ${seconds % 60} с"
 
     private fun report(outcome: SyncOutcome) {
         Diary.note(
@@ -857,6 +909,7 @@ class FrameDreamService : DreamService() {
         const val FOLDERS_FILE = "folders.json"
         const val STATS_FILE = "show-stats.csv"
         const val CACHE_DIRECTORY = "media"
+        const val HEAVY_DIRECTORY = "heavy"
         const val HISTORY_DEPTH = 10
         const val SKIP_NOTE_INTERVAL_MILLIS = 60_000L
 
