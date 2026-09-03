@@ -36,6 +36,7 @@ import ru.dvedev.me.yaphotoframe.slideshow.PreparedPhoto
 import ru.dvedev.me.yaphotoframe.slideshow.PreparedVideo
 import ru.dvedev.me.yaphotoframe.slideshow.Slideshow
 import ru.dvedev.me.yaphotoframe.tuner.TunerServer
+import ru.dvedev.me.yaphotoframe.video.CacheMediaDataSource
 import ru.dvedev.me.yaphotoframe.video.ExoStreamPrimer
 import ru.dvedev.me.yaphotoframe.video.StreamCache
 import ru.dvedev.me.yaphotoframe.video.VideoPlayback
@@ -360,6 +361,15 @@ class FrameDreamService : DreamService() {
                 deliver = engine::deliver,
                 settings = { store.current },
                 minLongSide = ::minPhotoLongSide,
+                streamSource = { item, delivery ->
+                    val key = delivery.cacheKey
+                    val cache = StreamCache.current()
+                    if (key != null && cache != null && item.sizeBytes > 0) {
+                        CacheMediaDataSource(cache, key, delivery.url, item.sizeBytes)
+                    } else {
+                        null
+                    }
+                },
             )
 
             // Холодный старт: показать хоть что-нибудь, не дожидаясь обхода.

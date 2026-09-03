@@ -2,8 +2,10 @@ package ru.dvedev.me.yaphotoframe.slideshow
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.MediaDataSource
 import android.media.MediaMetadataRetriever
 import android.os.Build
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import ru.dvedev.me.yaphotoframe.cache.Delivery
@@ -83,6 +85,11 @@ class FramePreparer(
     private val settings: () -> FrameSettings,
     /** Мельче скольких пикселей по длинной стороне снимок не показывать; ноль — всё. */
     private val minLongSide: () -> Int = { 0 },
+    /**
+     * Откуда читать ролик, идущий потоком, ради его первого кадра; null —
+     * неоткуда, тогда постером будет копия с Диска.
+     */
+    private val streamSource: (MediaItem, Delivery.Streamed) -> MediaDataSource? = { _, _ -> null },
 ) {
     suspend fun prepare(item: MediaItem): PreparedItem = withContext(Dispatchers.IO) {
         val background = backgroundFor(item)
@@ -132,14 +139,21 @@ class FramePreparer(
      * файла нет или кадр не достался — копия с Диска, как раньше.
      */
     private suspend fun posterFor(item: MediaItem, delivery: Delivery): Bitmap {
-        if (delivery is Delivery.Local) firstFrame(delivery.file)?.let { return it }
+        val frame = when (delivery) {
+            is Delivery.Local -> firstFrame { it.setDataSource(delivery.file.path) }
+            is Delivery.Streamed -> streamSource(item, delivery)?.let { source ->
+                source.use { firstFrame { retriever -> retriever.setDataSource(source) } }
+            }
+        }
+        if (frame != null) return frame
+        Log.d(TAG, "первый кадр ${item.name} не достался, постер — копия с Диска")
         return decode(previewFile(item, PreviewSize.FULL))
     }
 
-    private fun firstFrame(file: File): Bitmap? {
+    private fun firstFrame(attach: (MediaMetadataRetriever) -> Unit): Bitmap? {
         val retriever = MediaMetadataRetriever()
         return try {
-            retriever.setDataSource(file.path)
+            attach(retriever)
             val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
                 ?.toIntOrNull() ?: 0
             val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
@@ -197,6 +211,8 @@ class FramePreparer(
             .also { it.prepareToDraw() }
 
     private companion object {
+        const val TAG = "YaPhotoFrame"
+
         /** Длиннее экрана постеру быть незачем. */
         const val POSTER_LONG_SIDE = 1920
     }
