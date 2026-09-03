@@ -44,6 +44,11 @@ class Slideshow(
 
     private val requested = AtomicInteger(0)
 
+    /** На каком шаге цикл сейчас — чтобы сторож снаружи мог сказать, где застряли. */
+    @Volatile
+    var stage: String = "не начат"
+        private set
+
     /** Пауза: кадр висит, пока не снимут; листание пультом работает и на паузе. */
     @Volatile
     var paused = false
@@ -62,11 +67,14 @@ class Slideshow(
         var isFirst = !animateFirst
 
         while (scope.isActive) {
+            stage = "показываю ${pending.item.name}"
             onShow(pending, !isFirst)
             isFirst = false
 
             val preparing = scope.async { prepareNext() }
+            stage = "держу ${pending.item.name}"
             waitOutShow(scope)
+            stage = "жду подготовку следующего после ${pending.item.name}"
 
             val ahead = try {
                 // Сторож: подготовка однажды повисла насовсем, и рамка стояла
@@ -95,6 +103,7 @@ class Slideshow(
                 ahead?.discard()
                 back
             } else {
+                stage = "ищу следующий после ${pending.item.name}"
                 ahead ?: awaitNext(scope) ?: return
             }
         }
@@ -204,7 +213,17 @@ class Slideshow(
 
     private suspend fun prepareOne(): PreparedItem? {
         repeat(MAX_ATTEMPTS) {
-            val item = nextItem() ?: return null
+            // Выбор следующего — тоже внутри защиты: сбой в нём валил бы весь
+            // цикл показа, а не один кадр.
+            val item = try {
+                nextItem() ?: return null
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "не удалось выбрать следующий кадр", e)
+                delay(RETRY_MILLIS)
+                return@repeat
+            }
             try {
                 return preparer.prepare(item)
             } catch (e: CancellationException) {

@@ -249,7 +249,44 @@ class FrameDreamService : DreamService() {
 
     private fun startSlideshow() {
         slideshowJob?.cancel()
-        slideshowJob = scope.launch { runSlideshow() }
+        watchdogJob?.cancel()
+        val job = scope.launch { runSlideshow() }
+        slideshowJob = job
+        // Цикл показа однажды тихо кончился, и рамка стояла на одном снимке:
+        // причину — в дневник, чем бы она ни была.
+        job.invokeOnCompletion { cause ->
+            if (cause != null && cause !is CancellationException) {
+                Diary.problem("цикл показа завершился", cause)
+            } else if (cause == null) {
+                Diary.note("цикл показа завершился сам")
+            }
+        }
+        watchdogJob = scope.launch { watchSlideshow(job) }
+    }
+
+    private var watchdogJob: Job? = null
+    private var lastDisplayAtMillis = 0L
+
+    /**
+     * Сторож показа: кадр висит вдвое дольше положенного — значит, цикл
+     * застрял или умер. Записываем, где именно, и запускаем показ заново.
+     */
+    private suspend fun watchSlideshow(job: Job) {
+        while (true) {
+            kotlinx.coroutines.delay(WATCHDOG_TICK_MILLIS)
+            val shown = lastDisplayAtMillis
+            if (shown == 0L || paused) continue
+            val limit = holdMillis().coerceAtMost(UNLIMITED_VIDEO_MILLIS) + WATCHDOG_GRACE_MILLIS
+            if (holdMillis() >= UNLIMITED_VIDEO_MILLIS) continue
+            if (System.currentTimeMillis() - shown < limit) continue
+            val stage = slideshow?.stage ?: "нет цикла"
+            Diary.problem(
+                "показ застрял на шаге «$stage» (цикл ${if (job.isActive) "жив" else "мёртв"}), перезапускаю",
+            )
+            ru.dvedev.me.yaphotoframe.tuner.ThreadDump.text().lineSequence().forEach { Log.w(TAG, "stuck: $it") }
+            startSlideshow()
+            return
+        }
     }
 
     /**
@@ -423,7 +460,7 @@ class FrameDreamService : DreamService() {
             coroutineScope { slideshow.run(this) }
         } catch (e: CancellationException) {
             throw e
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Diary.problem("показ прерван", e)
             // Не достучались до хранилища при первом запуске — на экране должна
             // остаться подсказка, а не чернота.
@@ -718,6 +755,7 @@ class FrameDreamService : DreamService() {
         if (prepared is PreparedVideo) startPlayback(prepared)
 
         Log.i(TAG, "показываю ${describe(prepared)}")
+        lastDisplayAtMillis = System.currentTimeMillis()
         remember(prepared.item)
         stats.record(System.currentTimeMillis())
 
@@ -973,6 +1011,8 @@ class FrameDreamService : DreamService() {
         const val FOLDERS_FILE = "folders.json"
         const val STATS_FILE = "show-stats.csv"
         const val CACHE_DIRECTORY = "media"
+        const val WATCHDOG_TICK_MILLIS = 20_000L
+        const val WATCHDOG_GRACE_MILLIS = 90_000L
         const val HISTORY_DEPTH = 10
         const val SKIP_NOTE_INTERVAL_MILLIS = 60_000L
 
