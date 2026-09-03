@@ -314,6 +314,9 @@ class SetupActivity : Activity() {
             step = { s, d -> s.copy(minPhotoFraction = (s.minPhotoFraction + d * 0.05f).coerceIn(0f, 0.6f)) })
         rows += Row("Пары вертикальных", "два снимка рядом", { yesNo(it.pairPortraits) },
             step = { s, _ -> s.copy(pairPortraits = !s.pairPortraits) })
+        rows += Row("Пауза не дольше", "0 — пока не снимут", { if (it.pauseAutoResumeMillis <= 0) "бессрочно" else "${it.pauseAutoResumeMillis / 60_000} мин" }) { s, d ->
+            s.copy(pauseAutoResumeMillis = (s.pauseAutoResumeMillis + d * 60_000L).coerceAtLeast(0L))
+        }
         rows += Row("Часы", "поверх кадра", { yesNo(it.showClock) },
             step = { s, _ -> s.copy(showClock = !s.showClock) })
         rows += Row("Дата съёмки", "поверх кадра", { yesNo(it.showDate) },

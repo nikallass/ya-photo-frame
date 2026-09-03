@@ -89,6 +89,7 @@ class SettingsStore(context: Context) {
             pairPortraits = prefs.getBoolean(KEY_PAIRS, defaults.pairPortraits),
             freshnessWindowDays = prefs.getInt(KEY_FRESHNESS, defaults.freshnessWindowDays),
             showClock = prefs.getBoolean(KEY_CLOCK, defaults.showClock),
+            pauseAutoResumeMillis = prefs.getLong(KEY_PAUSE_RESUME, defaults.pauseAutoResumeMillis),
             showDate = prefs.getBoolean(KEY_DATE, defaults.showDate),
             prefetchCount = prefs.getInt(KEY_PREFETCH, defaults.prefetchCount),
             indexRefreshIntervalMillis =
@@ -132,6 +133,7 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_PAIRS, value.pairPortraits)
             .putInt(KEY_FRESHNESS, value.freshnessWindowDays)
             .putBoolean(KEY_CLOCK, value.showClock)
+            .putLong(KEY_PAUSE_RESUME, value.pauseAutoResumeMillis)
             .putBoolean(KEY_DATE, value.showDate)
             .putInt(KEY_PREFETCH, value.prefetchCount)
             .putLong(KEY_REFRESH, value.indexRefreshIntervalMillis)
@@ -166,6 +168,7 @@ class SettingsStore(context: Context) {
         const val KEY_FRESHNESS = "freshness_window_days"
         const val KEY_MIN_PHOTO = "min_photo_fraction"
         const val KEY_CLOCK = "show_clock"
+        const val KEY_PAUSE_RESUME = "pause_auto_resume_millis"
         const val KEY_DATE = "show_date"
     }
 }
@@ -217,6 +220,7 @@ fun FrameSettings.sanitized(): FrameSettings {
         pairPortraits = pairPortraits,
         freshnessWindowDays = freshnessWindowDays.coerceIn(1, 3650),
         showClock = showClock,
+        pauseAutoResumeMillis = pauseAutoResumeMillis.coerceIn(0L, 24L * 60 * 60 * 1000),
         showDate = showDate,
         prefetchCount = prefetchCount.coerceIn(1, 50),
         // Не реже трёх часов: столько живут ссылки Диска на превью.

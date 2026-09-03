@@ -166,6 +166,14 @@ data class FrameSettings(
      */
     val freshnessWindowDays: Int = 14,
 
+    /**
+     * Через сколько пауза снимается сама; ноль — никогда.
+     *
+     * Пауза ставится «на минутку» и забывается, а рамка потом сутки висит на
+     * одном кадре — с риском выжечь экран.
+     */
+    val pauseAutoResumeMillis: Long = 10L * 60 * 1000,
+
     /** Показывать ли часы поверх кадра. */
     val showClock: Boolean = false,
 

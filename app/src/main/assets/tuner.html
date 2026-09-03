@@ -258,6 +258,10 @@ const logScale = {
 };
 
 const FIELDS = [
+  { key: 'pauseAutoResumeMillis', name: 'Пауза не дольше', note: 'потом показ продолжится сам; 0 — пока не снимут',
+    min: 0, max: 120, step: 1, get: v => Math.round(v / 60000), set: s => s * 60000,
+    show: v => v ? Math.round(v / 60000) + ' мин' : 'пока не снимут' },
+
   { key: 'videoMaxSizeBytes', name: 'Ролик не тяжелее', note: 'тяжелее порога кэша ролик идёт потоком, а тяжёлый поток заикается на Wi-Fi; 0 — без ограничения',
     min: 0, max: 4096, step: 64, get: v => Math.round(v / 1048576), set: s => s * 1048576,
     show: v => !v ? 'без ограничения' : v >= 1073741824 ? (v / 1073741824).toFixed(1) + ' ГБ' : Math.round(v / 1048576) + ' МБ' },

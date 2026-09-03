@@ -326,6 +326,8 @@ class TunerServer(
                 minPhotoFraction = values["minPhotoFraction"]?.toFloatOrNull()
                     ?: current.minPhotoFraction,
                 showClock = values["showClock"]?.toBooleanStrictOrNull() ?: current.showClock,
+                pauseAutoResumeMillis = values["pauseAutoResumeMillis"]?.toLongOrNull()
+                    ?: current.pauseAutoResumeMillis,
                 showDate = values["showDate"]?.toBooleanStrictOrNull() ?: current.showDate,
                 // Пустое значение — законный выбор «вся папка целиком»,
                 // поэтому отличаем отсутствие ключа от пустой строки.
@@ -369,6 +371,7 @@ class TunerServer(
         append("\"freshnessWindowDays\":").append(settings.freshnessWindowDays).append(',')
         append("\"minPhotoFraction\":").append(settings.minPhotoFraction).append(',')
         append("\"showClock\":").append(settings.showClock).append(',')
+        append("\"pauseAutoResumeMillis\":").append(settings.pauseAutoResumeMillis).append(',')
         append("\"showDate\":").append(settings.showDate).append(',')
         append("\"selectedFolders\":").append(
             settings.selectedFolders.joinToString(",", "[", "]") { "\"" + it.replace("\"", "") + "\"" },

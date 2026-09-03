@@ -110,8 +110,12 @@ class SlideshowView(context: Context) : FrameLayout(context) {
         // читалось как заминка.
         if (incoming is FrameLayer) {
             incoming.startDrift(settings.showDurationMillis + settings.crossfadeMillis)
+            // Долистали на паузе — новый кадр тоже стоит, а не плывёт.
+            if (paused) incoming.setDriftPaused(true)
         }
     }
+
+    private var paused = false
 
     private var fade: Runnable? = null
     private val fadeHandler = Handler(Looper.getMainLooper())
@@ -170,6 +174,7 @@ class SlideshowView(context: Context) : FrameLayout(context) {
 
     /** Пауза: ход замирает, значок в углу; часы идут своим чередом. */
     fun setPaused(paused: Boolean) {
+        this.paused = paused
         photoLayers.forEach { it.setDriftPaused(paused) }
         overlay.setPaused(paused)
     }

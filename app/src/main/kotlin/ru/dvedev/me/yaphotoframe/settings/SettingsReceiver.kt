@@ -84,6 +84,8 @@ class SettingsReceiver : BroadcastReceiver() {
             "minPhotoFraction" ->
                 raw.toFloatOrNull()?.let { settings.copy(minPhotoFraction = it) }
             "showClock" -> raw.toBooleanStrictOrNull()?.let { settings.copy(showClock = it) }
+            "pauseAutoResumeMillis" ->
+                raw.toLongOrNull()?.let { settings.copy(pauseAutoResumeMillis = it) }
             "showDate" -> raw.toBooleanStrictOrNull()?.let { settings.copy(showDate = it) }
             else -> null
         }

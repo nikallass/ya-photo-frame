@@ -146,6 +146,7 @@ class FrameDreamService : DreamService() {
         scope.coroutineContext.cancelChildren()
         // Отметки о показе копятся в памяти и ложатся на диск с задержкой —
         // перед остановкой их надо дописать, иначе потеряется история вечера.
+        pauseHandler.removeCallbacks(autoResume)
         engine?.flush()
         Diary.note("показ остановлен")
         super.onDreamingStopped()
@@ -593,12 +594,25 @@ class FrameDreamService : DreamService() {
      * Пауза по «ОК»: кадр и ролик замирают, отсчёт до смены стоит, часы идут.
      * Стрелки листают и на паузе — сам кадр при этом остаётся на паузе.
      */
-    private fun togglePause() {
-        paused = !paused
-        slideshow?.paused = paused
-        slideshowView?.setPaused(paused)
-        if (showingVideo) playback.setPaused(paused)
-        Log.i(TAG, if (paused) "пауза" else "продолжаю")
+    private fun togglePause() = setPaused(!paused)
+
+    private val pauseHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val autoResume = Runnable {
+        Diary.note("пауза снята по времени")
+        setPaused(false)
+    }
+
+    private fun setPaused(value: Boolean) {
+        paused = value
+        slideshow?.paused = value
+        slideshowView?.setPaused(value)
+        if (showingVideo) playback.setPaused(value)
+        pauseHandler.removeCallbacks(autoResume)
+        // Пауза «на минутку» забывается, и рамка сутки висит на одном кадре;
+        // через заданное время показ продолжается сам.
+        val limit = store.current.pauseAutoResumeMillis
+        if (value && limit > 0) pauseHandler.postDelayed(autoResume, limit)
+        Log.i(TAG, if (value) "пауза" else "продолжаю")
     }
 
     /**
