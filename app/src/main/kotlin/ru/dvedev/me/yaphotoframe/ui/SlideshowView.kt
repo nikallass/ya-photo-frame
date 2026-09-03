@@ -1,6 +1,7 @@
 package ru.dvedev.me.yaphotoframe.ui
 
 import android.content.Context
+import android.os.SystemClock
 import android.graphics.Color
 import android.os.Handler
 import android.os.Looper
@@ -147,10 +148,10 @@ class SlideshowView(context: Context) : FrameLayout(context) {
         // бы его сам и опаздывал.
         view.alpha = 1f / 255
         view.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-        val startedAt = System.currentTimeMillis() + FADE_WARMUP_MILLIS
+        val startedAt = SystemClock.elapsedRealtime() + FADE_WARMUP_MILLIS
         val tick = object : Runnable {
             override fun run() {
-                val progress = ((System.currentTimeMillis() - startedAt).toFloat() / durationMillis)
+                val progress = ((SystemClock.elapsedRealtime() - startedAt).toFloat() / durationMillis)
                     .coerceIn(0f, 1f)
                 view.alpha = maxOf(fadeCurve.getInterpolation(progress), 1f / 255)
                 if (progress < 1f) {

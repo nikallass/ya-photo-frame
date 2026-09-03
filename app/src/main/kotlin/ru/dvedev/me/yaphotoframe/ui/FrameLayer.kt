@@ -1,6 +1,7 @@
 package ru.dvedev.me.yaphotoframe.ui
 
 import android.content.Context
+import android.os.SystemClock
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.view.Gravity
@@ -150,7 +151,7 @@ class FrameLayer(context: Context) : FrameLayout(context) {
         pairHolder.pivotX = pivotX; pairHolder.pivotY = pivotY
         this.pivotX = pivotX; this.pivotY = pivotY
         drift = Drift(
-            startedAt = System.currentTimeMillis(),
+            startedAt = SystemClock.elapsedRealtime(),
             durationMillis = driftMillis,
             fromX = startX,
             fromY = startY,
@@ -189,7 +190,7 @@ class FrameLayer(context: Context) : FrameLayout(context) {
     private val driftTick = object : Runnable {
         override fun run() {
             val current = drift ?: return
-            val elapsed = (System.currentTimeMillis() - current.startedAt).toFloat()
+            val elapsed = (SystemClock.elapsedRealtime() - current.startedAt).toFloat()
             val progress = (elapsed / current.durationMillis).coerceIn(0f, 1f)
             val zoomProgress = (elapsed / current.zoomMillis).coerceIn(0f, 1f)
             val x = current.fromX + (current.toX - current.fromX) * progress
@@ -232,10 +233,10 @@ class FrameLayer(context: Context) : FrameLayout(context) {
     fun setDriftPaused(paused: Boolean) {
         val current = drift ?: return
         if (paused && driftPausedAt == 0L) {
-            driftPausedAt = System.currentTimeMillis()
+            driftPausedAt = SystemClock.elapsedRealtime()
             driftHandler.removeCallbacks(driftTick)
         } else if (!paused && driftPausedAt != 0L) {
-            val pausedFor = System.currentTimeMillis() - driftPausedAt
+            val pausedFor = SystemClock.elapsedRealtime() - driftPausedAt
             driftPausedAt = 0L
             drift = Drift(
                 startedAt = current.startedAt + pausedFor,

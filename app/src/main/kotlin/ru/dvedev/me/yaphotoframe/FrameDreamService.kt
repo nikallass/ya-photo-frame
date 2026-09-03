@@ -272,13 +272,27 @@ class FrameDreamService : DreamService() {
      * застрял или умер. Записываем, где именно, и запускаем показ заново.
      */
     private suspend fun watchSlideshow(job: Job) {
+        var wallBefore = System.currentTimeMillis()
+        var monoBefore = android.os.SystemClock.elapsedRealtime()
         while (true) {
             kotlinx.coroutines.delay(WATCHDOG_TICK_MILLIS)
+            // Настенные часы против монотонных: телевизор подводит время по
+            // сети, и такой сдвиг однажды держал кадр минутами. Теперь
+            // отсчёты на него не смотрят, но в дневнике он останется.
+            val wallNow = System.currentTimeMillis()
+            val monoNow = android.os.SystemClock.elapsedRealtime()
+            val skew = (wallNow - wallBefore) - (monoNow - monoBefore)
+            if (kotlin.math.abs(skew) > CLOCK_SKEW_NOTE_MILLIS) {
+                Diary.note("системные часы сдвинулись на ${skew / 1000} с")
+            }
+            wallBefore = wallNow
+            monoBefore = monoNow
+
             val shown = lastDisplayAtMillis
             if (shown == 0L || paused) continue
             val limit = holdMillis().coerceAtMost(UNLIMITED_VIDEO_MILLIS) + WATCHDOG_GRACE_MILLIS
             if (holdMillis() >= UNLIMITED_VIDEO_MILLIS) continue
-            if (System.currentTimeMillis() - shown < limit) continue
+            if (monoNow - shown < limit) continue
             val stage = slideshow?.stage ?: "нет цикла"
             Diary.problem(
                 "показ застрял на шаге «$stage» (цикл ${if (job.isActive) "жив" else "мёртв"}), перезапускаю",
@@ -755,7 +769,7 @@ class FrameDreamService : DreamService() {
         if (prepared is PreparedVideo) startPlayback(prepared)
 
         Log.i(TAG, "показываю ${describe(prepared)}")
-        lastDisplayAtMillis = System.currentTimeMillis()
+        lastDisplayAtMillis = android.os.SystemClock.elapsedRealtime()
         remember(prepared.item)
         stats.record(System.currentTimeMillis())
 
@@ -1012,6 +1026,7 @@ class FrameDreamService : DreamService() {
         const val STATS_FILE = "show-stats.csv"
         const val CACHE_DIRECTORY = "media"
         const val WATCHDOG_TICK_MILLIS = 20_000L
+        const val CLOCK_SKEW_NOTE_MILLIS = 3_000L
         const val WATCHDOG_GRACE_MILLIS = 90_000L
         const val HISTORY_DEPTH = 10
         const val SKIP_NOTE_INTERVAL_MILLIS = 60_000L

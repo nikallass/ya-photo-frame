@@ -1,6 +1,7 @@
 package ru.dvedev.me.yaphotoframe.ui
 
 import android.content.Context
+import android.os.SystemClock
 import android.graphics.Color
 import android.os.Handler
 import android.os.Looper
@@ -83,7 +84,7 @@ class FrameOverlay(context: Context) : FrameLayout(context) {
     }
 
     private val handler = Handler(Looper.getMainLooper())
-    private var startedAtMillis = System.currentTimeMillis()
+    private var startedAtMillis = SystemClock.elapsedRealtime()
     private var atRightCorner = true
 
     private val tick = object : Runnable {
@@ -164,7 +165,7 @@ class FrameOverlay(context: Context) : FrameLayout(context) {
     private fun drift() {
         if (width == 0 || height == 0) return
 
-        val elapsed = (System.currentTimeMillis() - startedAtMillis).toFloat()
+        val elapsed = (SystemClock.elapsedRealtime() - startedAtMillis).toFloat()
         val shouldBeRight = ((elapsed / CORNER_PERIOD_MILLIS).toInt() % 2) == 0
         if (shouldBeRight != atRightCorner) {
             atRightCorner = shouldBeRight
@@ -197,7 +198,7 @@ class FrameOverlay(context: Context) : FrameLayout(context) {
             .alpha(0f)
             .setDuration(FADE_MILLIS)
             .withEndAction {
-                val elapsed = (System.currentTimeMillis() - startedAtMillis).toFloat()
+                val elapsed = (SystemClock.elapsedRealtime() - startedAtMillis).toFloat()
                 clockView.translationX = positionX(elapsed)
                 clockView.translationY = positionY(elapsed)
                 clockView.animate().alpha(CLOCK_ALPHA).setDuration(FADE_MILLIS).start()

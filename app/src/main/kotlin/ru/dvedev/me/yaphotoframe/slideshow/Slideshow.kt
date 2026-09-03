@@ -134,7 +134,9 @@ class Slideshow(
      * того, как истечёт уже начатая минута.
      */
     private suspend fun waitOutShow(scope: CoroutineScope) {
-        var startedAt = System.currentTimeMillis()
+        // Монотонные часы, не настенные: телевизор подводит своё время по
+        // сети, и после перевода назад кадр висел, пока часы не догонят.
+        var startedAt = monotonicMillis()
         while (scope.isActive) {
             if (requested.get() != 0) return
             if (paused) {
@@ -143,7 +145,7 @@ class Slideshow(
                 startedAt += POLL_INTERVAL_MILLIS
                 continue
             }
-            val elapsed = System.currentTimeMillis() - startedAt
+            val elapsed = monotonicMillis() - startedAt
             val remaining = showDurationMillis() - elapsed
             if (remaining <= 0) return
             delay(minOf(remaining, POLL_INTERVAL_MILLIS))
@@ -248,6 +250,8 @@ class Slideshow(
             null
         }
     }
+
+    private fun monotonicMillis(): Long = System.nanoTime() / 1_000_000
 
     private companion object {
         const val TAG = "YaPhotoFrame"
