@@ -160,6 +160,25 @@ class YandexPublicDiskSource(
         }
     }
 
+    override suspend fun refresh(item: MediaItem): MediaItem? = withContext(Dispatchers.IO) {
+        val url = apiBase.newBuilder()
+            .addQueryParameter("public_key", publicKey)
+            .addQueryParameter("path", item.path)
+            .addQueryParameter("preview_size", PreviewSize.FULL.apiValue)
+            .addQueryParameter("preview_crop", "false")
+            .build()
+        val request = Request.Builder().url(url).header("Accept", "application/json").build()
+        http.newCall(request).execute().use { response ->
+            if (response.code == 404) return@withContext null
+            if (!response.isSuccessful) {
+                throw IOException("сведения о «${item.path}» вернули ${response.code}")
+            }
+            val body = response.body?.string() ?: throw IOException("пустой ответ о «${item.path}»")
+            // Ответ об одном файле устроен так же, как элемент листинга.
+            toMediaItem(json.decodeFromString(ResourceItemDto.serializer(), body))
+        }
+    }
+
     /** Одна папка целиком: страницы запрашиваются, пока не кончатся элементы. */
     private fun listFolder(path: String): List<ResourceItemDto> {
         val entries = mutableListOf<ResourceItemDto>()

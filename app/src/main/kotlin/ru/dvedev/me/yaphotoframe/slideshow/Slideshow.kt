@@ -33,6 +33,10 @@ class Slideshow(
      * обхода, и резкая подмена бросалась бы в глаза.
      */
     private val animateFirst: Boolean = false,
+    /** Кадр, не требующий сети, когда очередь не открывается; null — нет такого. */
+    private val fallbackItem: () -> MediaItem? = { null },
+    /** Сюда сообщается о каждом пропущенном кадре — владелец увидит причину. */
+    private val onSkip: (MediaItem, Exception) -> Unit = { _, _ -> },
 ) {
 
     private val requested = AtomicInteger(0)
@@ -47,10 +51,7 @@ class Slideshow(
     private var carried: PreparedItem? = null
 
     suspend fun run(scope: CoroutineScope) {
-        var pending = prepareNext() ?: run {
-            Log.w(TAG, "показывать нечего")
-            return
-        }
+        var pending = awaitNext(scope) ?: return
         var isFirst = !animateFirst
 
         while (scope.isActive) {
@@ -77,9 +78,26 @@ class Slideshow(
                 ahead?.discard()
                 back
             } else {
-                ahead ?: break
+                ahead ?: awaitNext(scope) ?: return
             }
         }
+    }
+
+    /**
+     * Ждёт, пока хоть что-нибудь удастся подготовить.
+     *
+     * Сдаваться нельзя: рамка однажды простояла ночь чёрной, потому что серия
+     * отказов пришлась на пропавшую сеть, и цикл показа вышел насовсем. Сеть
+     * возвращается, ссылки обновляются — надо просто попробовать позже.
+     * Возвращает null только когда показ остановили.
+     */
+    private suspend fun awaitNext(scope: CoroutineScope): PreparedItem? {
+        while (scope.isActive) {
+            prepareNext()?.let { return it }
+            Log.w(TAG, "показывать нечего, попробую через ${RETRY_MILLIS / 1000} с")
+            delay(RETRY_MILLIS)
+        }
+        return null
     }
 
     /**
@@ -170,10 +188,23 @@ class Slideshow(
                 throw e
             } catch (e: Exception) {
                 Log.w(TAG, "пропускаю ${item.name}: ${e.message}")
+                onSkip(item, e)
             }
         }
         Log.w(TAG, "подряд не удалось загрузить $MAX_ATTEMPTS кадров")
-        return null
+
+        // Череда отказов — это, скорее всего, сеть. Кадр из кэша сети не просит.
+        val fallback = fallbackItem() ?: return null
+        return try {
+            Log.i(TAG, "беру из кэша ${fallback.name}")
+            preparer.prepare(fallback)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "и из кэша не вышло ${fallback.name}: ${e.message}")
+            onSkip(fallback, e)
+            null
+        }
     }
 
     private companion object {
@@ -184,5 +215,8 @@ class Slideshow(
 
         /** Сколько неудач подряд считать бедой сети, а не отдельного файла. */
         const val MAX_ATTEMPTS = 8
+
+        /** Пауза между заходами, когда подготовить не удалось ничего. */
+        const val RETRY_MILLIS = 10_000L
     }
 }

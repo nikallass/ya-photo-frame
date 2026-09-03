@@ -26,6 +26,7 @@ import ru.dvedev.me.yaphotoframe.library.FolderIndexStore
 import ru.dvedev.me.yaphotoframe.library.LibraryStore
 import ru.dvedev.me.yaphotoframe.library.SyncOutcome
 import ru.dvedev.me.yaphotoframe.media.FolderSelection
+import ru.dvedev.me.yaphotoframe.media.MediaItem
 import ru.dvedev.me.yaphotoframe.media.yandex.YandexPublicDiskSource
 import ru.dvedev.me.yaphotoframe.settings.SettingsStore
 import ru.dvedev.me.yaphotoframe.slideshow.FramePreparer
@@ -350,6 +351,8 @@ class FrameDreamService : DreamService() {
                 pairPortraits = { store.current.pairPortraits },
                 onShow = ::display,
                 animateFirst = cameUpCold,
+                fallbackItem = engine::cachedFallback,
+                onSkip = ::noteSkip,
             )
             this.slideshow = slideshow
             coroutineScope { slideshow.run(this) }
@@ -361,6 +364,26 @@ class FrameDreamService : DreamService() {
             // остаться подсказка, а не чернота.
             if (engine?.showablePhotos().isNullOrEmpty()) showGuide()
         }
+    }
+
+    private var lastSkipMessage: String? = null
+    private var lastSkipAtMillis = 0L
+
+    /**
+     * Пропущенный кадр — в дневник, но без потопа.
+     *
+     * При лежащей сети отказы идут пачками по восемь каждые десять секунд и
+     * вытеснили бы из дневника всё остальное. Одинаковые причины подряд
+     * записываются не чаще раза в минуту.
+     */
+    private fun noteSkip(item: MediaItem, cause: Exception) {
+        val message = cause.message ?: cause.javaClass.simpleName
+        val now = System.currentTimeMillis()
+        val sameAsBefore = message.substringBefore(" вернул") == lastSkipMessage?.substringBefore(" вернул")
+        if (sameAsBefore && now - lastSkipAtMillis < SKIP_NOTE_INTERVAL_MILLIS) return
+        lastSkipMessage = message
+        lastSkipAtMillis = now
+        Diary.problem("пропускаю ${item.name}: $message")
     }
 
     /** Крупная подсказка вместо чёрного экрана, когда показывать нечего. */
@@ -653,6 +676,7 @@ class FrameDreamService : DreamService() {
         const val STATS_FILE = "show-stats.csv"
         const val CACHE_DIRECTORY = "media"
         const val HISTORY_DEPTH = 10
+        const val SKIP_NOTE_INTERVAL_MILLIS = 60_000L
         /** Сколько держать подсказку, вызванную с пульта. */
         const val GUIDE_FLASH_MILLIS = 10_000L
         /** «Без ограничения» для ролика: сутки, которых не бывает. */

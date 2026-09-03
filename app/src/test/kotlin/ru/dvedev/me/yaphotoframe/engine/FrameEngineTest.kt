@@ -79,11 +79,18 @@ class FrameEngineTest {
                     url.encodedPath.startsWith("/file/") ->
                         bytes(url.pathSegments.last().toInt())
 
-                    url.encodedPath.startsWith("/preview/") ->
-                        bytes(
+                    url.encodedPath.startsWith("/preview/") -> when {
+                        offline -> MockResponse().setResponseCode(503)
+                        // Погасшая подпись: хранилище отвечает 410, пока ссылку
+                        // не спросят заново.
+                        url.queryParameter("filename") in expired &&
+                            !url.encodedPath.contains("/fresh/") -> MockResponse().setResponseCode(410)
+
+                        else -> bytes(
                             if (url.queryParameter("size") == "S") BYTES_PER_MICRO
                             else BYTES_PER_FULL
                         )
+                    }
 
                     else -> listing(url)
                 }
@@ -93,6 +100,12 @@ class FrameEngineTest {
     }
 
     private fun bytes(count: Int) = MockResponse().setBody(Buffer().write(ByteArray(count)))
+
+    /** Имена файлов, чьи ссылки на превью из индекса уже погасли. */
+    private val expired = mutableSetOf<String>()
+
+    /** Сеть легла: превью не отдаются вовсе. */
+    private var offline = false
 
     private fun listing(url: okhttp3.HttpUrl): MockResponse {
         val path = url.queryParameter("path") ?: "/"
@@ -545,6 +558,42 @@ class FrameEngineTest {
         val picks = (1..8).map { checkNotNull(engine.advance()).path }
         val fresh = picks.count { path -> appeared.any { it.item.path == path } }
         assertEquals("все новые вышли в первой восьмёрке: $picks", 5, fresh)
+    }
+
+    @Test
+    fun `погасшая ссылка на превью обновляется у хранилища, а не роняет кадр`() = runTest {
+        switchToCacheFolder()
+        available["/кадр3.jpg"] = listOf("refresh-kadr3.json")
+        expired += "кадр3.jpg"
+        val engine = library(pageLimit = 50)
+        engine.sync()
+        val item = engine.entries.single { it.item.name == "кадр3.jpg" }.item
+
+        val file = engine.previewFile(item, PreviewSize.FULL)
+
+        assertEquals("копия скачана по свежей ссылке", BYTES_PER_FULL.toLong(), file.length())
+        val remembered = engine.entries.single { it.item.name == "кадр3.jpg" }.item.preview
+        assertTrue("свежая ссылка легла в индекс", remembered!!.template.contains("/fresh/"))
+        // И по старому элементу из очереди тоже идём по свежей ссылке.
+        engine.previewFile(item, PreviewSize.MICRO)
+        assertTrue("обе копии в кэше", cachedNames().size >= 2)
+    }
+
+    @Test
+    fun `когда сеть легла, запасной кадр берётся из того, что уже в кэше`() = runTest {
+        switchToCacheFolder()
+        val engine = library(pageLimit = 50)
+        engine.sync()
+        assertNull("пустой кэш запасного не даёт", engine.cachedFallback())
+
+        engine.prefetch()
+        offline = true
+
+        val fallback = checkNotNull(engine.cachedFallback())
+        assertTrue(
+            "у запасного обе копии в кэше",
+            PreviewSize.entries.all { engine.previewFile(fallback, it).isFile },
+        )
     }
 
     @Test

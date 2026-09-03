@@ -3,6 +3,7 @@ package ru.dvedev.me.yaphotoframe.engine
 import ru.dvedev.me.yaphotoframe.cache.CacheKey
 import ru.dvedev.me.yaphotoframe.cache.CachePolicy
 import ru.dvedev.me.yaphotoframe.cache.Delivery
+import ru.dvedev.me.yaphotoframe.cache.HttpFailure
 import ru.dvedev.me.yaphotoframe.cache.MediaCache
 import ru.dvedev.me.yaphotoframe.cache.MediaFetcher
 import ru.dvedev.me.yaphotoframe.library.LibraryEntry
@@ -286,10 +287,49 @@ class FrameEngine(
         PlannedDelivery.Stream -> Delivery.Streamed(source.downloadUrl(item))
     }
 
-    /** Уменьшенная копия нужного размера, из кэша или из сети. */
+    /**
+     * Уменьшенная копия нужного размера, из кэша или из сети.
+     *
+     * Ссылки на копии подписаны и гаснут через несколько часов, а индекс
+     * обновляется раз в три часа и живёт между запусками сутками. Погасшая
+     * ссылка не повод пропускать снимок: спрашиваем у хранилища свежую,
+     * запоминаем её и качаем ещё раз. Именно на этом рамка однажды встала на
+     * ночь: все кадры в очереди отдали 410, и показывать стало нечего.
+     */
     suspend fun previewFile(item: MediaItem, size: PreviewSize): File {
-        val preview = requireNotNull(item.preview) { "у ${item.path} нет превью" }
-        return fetcher.ensure(CacheKey.forPreview(item, size), preview.at(size))
+        // Ссылку берём из индекса, а не из переданного элемента: его могли
+        // взять из очереди до того, как ссылку обновили.
+        val current = entryOf(item.path)?.item ?: item
+        val preview = requireNotNull(current.preview) { "у ${item.path} нет превью" }
+        val key = CacheKey.forPreview(item, size)
+        return try {
+            fetcher.ensure(key, preview.at(size))
+        } catch (e: HttpFailure) {
+            if (!e.isStaleLink) throw e
+            val fresh = source.refresh(current) ?: throw e
+            val freshPreview = fresh.preview ?: throw e
+            library.updateItem(fresh)
+            fetcher.ensure(key, freshPreview.at(size))
+        }
+    }
+
+    /**
+     * Кадр, для которого ничего качать не нужно, — на случай, когда сеть легла.
+     *
+     * Очередь набирается без оглядки на кэш, и при пропавшей сети она вся
+     * упирается в незакачанное. Библиотека же по большей части давно лежит
+     * на устройстве; лучше показать из неё, чем чёрный экран.
+     */
+    fun cachedFallback(): MediaItem? {
+        val ready = candidates().filter { entry ->
+            entry.item.kind == MediaKind.PHOTO &&
+                PreviewSize.entries.all { cache.has(previewKey(entry.item.path, it)) }
+        }
+        // Очередь не исключается: закачано как раз то, что в ней стояло, а
+        // не открылось из неё то, что закачать не успели.
+        val picked = playlist.pick(ready, emptySet(), clock()) ?: return null
+        library.markShown(picked.item.path)
+        return picked.item
     }
 
     private fun previewKey(path: String, size: PreviewSize) = CacheKey.forPreview(path, size)

@@ -1,5 +1,6 @@
 package ru.dvedev.me.yaphotoframe.library
 
+import ru.dvedev.me.yaphotoframe.media.MediaItem
 import ru.dvedev.me.yaphotoframe.media.MediaKind
 import ru.dvedev.me.yaphotoframe.media.MediaSource
 import java.util.concurrent.Executors
@@ -111,6 +112,17 @@ class MediaLibrary(
 
         val updated = snapshot.entries.toMutableList()
         updated[index] = updated[index].copy(lastShownAtMillis = clock())
+        snapshot = snapshot.copy(entries = updated)
+        scheduleSave()
+    }
+
+    /** Подменяет сведения об элементе, не трогая память о показах. */
+    fun updateItem(item: MediaItem) {
+        val index = snapshot.entries.indexOfFirst { it.item.path == item.path }
+        if (index < 0) return
+
+        val updated = snapshot.entries.toMutableList()
+        updated[index] = updated[index].copy(item = item)
         snapshot = snapshot.copy(entries = updated)
         scheduleSave()
     }
