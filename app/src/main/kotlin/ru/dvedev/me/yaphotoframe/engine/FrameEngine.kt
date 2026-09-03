@@ -25,10 +25,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.withLock
+import kotlin.coroutines.coroutineContext
+import kotlin.coroutines.coroutineContext
 import kotlin.random.Random
 
 /**
@@ -491,6 +494,10 @@ class FrameEngine(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            // Отменённая подкачка — не провал: прерванный поток бросает
+            // обычную ошибку ввода-вывода, и ролик, у которого просто
+            // отняли очередь, играл бы потом с пустым буфером.
+            coroutineContext.ensureActive()
             val reason = e.message ?: e.javaClass.simpleName
             // Не подкачался — пусть идёт потоком как есть: ждать дальше
             // нечего, а пропускать ролик из-за буфера было бы обидно.

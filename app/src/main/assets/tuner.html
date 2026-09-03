@@ -837,9 +837,7 @@ async function loadState() {
     const pr = c.priming;
     document.getElementById('cache').innerHTML =
       kv('занято', bytes(c.usedBytes)) + kv('из', bytes(c.budgetBytes)) + kv('файлов', c.files) +
-      (c.primeBudgetBytes ? kv('буфер потока', bytes(c.primedBytes) + ' из ' + bytes(c.primeBudgetBytes)) : '') +
-      (pr ? kv('подкачивается заранее', pr.name + ' — ' + bytes(pr.doneBytes) + ' из ' + bytes(pr.wantedBytes) +
-        (pr.wantedBytes ? ' (' + Math.round(pr.doneBytes / pr.wantedBytes * 100) + ' %)' : '')) : '');
+      '';
     document.getElementById('cachebar').style.width =
       Math.min(100, c.budgetBytes ? c.usedBytes / c.budgetBytes * 100 : 0) + '%';
     // Своя полоска у буфера потока: пока идёт подкачка — её ход, иначе занятость.

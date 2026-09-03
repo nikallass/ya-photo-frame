@@ -2,7 +2,6 @@ package ru.dvedev.me.yaphotoframe.slideshow
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.media.MediaDataSource
 import android.media.MediaMetadataRetriever
 import android.os.Build
 import android.util.Log
@@ -86,10 +85,11 @@ class FramePreparer(
     /** Мельче скольких пикселей по длинной стороне снимок не показывать; ноль — всё. */
     private val minLongSide: () -> Int = { 0 },
     /**
-     * Откуда читать ролик, идущий потоком, ради его первого кадра; null —
-     * неоткуда, тогда постером будет копия с Диска.
+     * Начало ролика, идущего потоком, обычным файлом — ради его первого кадра;
+     * null — не достать, тогда постером будет копия с Диска. Файл временный,
+     * после разбора удаляется здесь.
      */
-    private val streamSource: (MediaItem, Delivery.Streamed) -> MediaDataSource? = { _, _ -> null },
+    private val streamHead: suspend (MediaItem, Delivery.Streamed) -> File? = { _, _ -> null },
 ) {
     suspend fun prepare(item: MediaItem): PreparedItem = withContext(Dispatchers.IO) {
         val background = backgroundFor(item)
@@ -141,8 +141,12 @@ class FramePreparer(
     private suspend fun posterFor(item: MediaItem, delivery: Delivery): Bitmap {
         val frame = when (delivery) {
             is Delivery.Local -> firstFrame { it.setDataSource(delivery.file.path) }
-            is Delivery.Streamed -> streamSource(item, delivery)?.let { source ->
-                source.use { firstFrame { retriever -> retriever.setDataSource(source) } }
+            is Delivery.Streamed -> streamHead(item, delivery)?.let { head ->
+                try {
+                    firstFrame { it.setDataSource(head.path) }
+                } finally {
+                    head.delete()
+                }
             }
         }
         if (frame != null) return frame
