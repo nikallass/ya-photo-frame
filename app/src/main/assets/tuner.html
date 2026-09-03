@@ -281,8 +281,8 @@ const FIELDS = [
   { key: 'prefetchCount', name: 'Предзагрузка', note: 'на сколько кадров вперёд готовиться',
     min: 1, max: 50, step: 1, get: v => v, set: s => s, show: v => v + ' кадр(ов)' },
 
-  { key: 'indexRefreshIntervalMillis', name: 'Переобход папки', note: 'не чаще чем раз в',
-    min: 1, max: 1440, step: 1,
+  { key: 'indexRefreshIntervalMillis', name: 'Переобход папки', note: 'не чаще чем раз в; не реже трёх часов — столько живут ссылки Диска',
+    min: 1, max: 180, step: 1,
     get: v => Math.round(v / 60000), set: s => s * 60000,
     show: v => { const m = Math.round(v / 60000);
       return m < 60 ? m + ' мин' : (m / 60).toFixed(m % 60 ? 1 : 0) + ' ч'; } },

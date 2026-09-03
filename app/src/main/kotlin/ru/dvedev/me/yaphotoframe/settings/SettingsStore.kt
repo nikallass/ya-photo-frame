@@ -207,9 +207,10 @@ fun FrameSettings.sanitized(): FrameSettings {
         showClock = showClock,
         showDate = showDate,
         prefetchCount = prefetchCount.coerceIn(1, 50),
+        // Не реже трёх часов: столько живут ссылки Диска на превью.
         indexRefreshIntervalMillis = indexRefreshIntervalMillis.coerceIn(
             60_000L,
-            24L * 60 * 60 * 1000,
+            3L * 60 * 60 * 1000,
         ),
     )
 }
