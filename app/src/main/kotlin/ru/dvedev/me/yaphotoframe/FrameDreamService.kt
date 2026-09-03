@@ -566,6 +566,11 @@ class FrameDreamService : DreamService() {
                 show.page(-1); true
             }
 
+            show != null && (event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                event.keyCode == KeyEvent.KEYCODE_ENTER) -> {
+                togglePause(); true
+            }
+
             event.keyCode == KeyEvent.KEYCODE_DPAD_UP ||
                 event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN -> {
                 if (guideOverlay == null) flashGuide() else hideGuideOverlay()
@@ -579,6 +584,20 @@ class FrameDreamService : DreamService() {
                 true
             }
         }
+    }
+
+    private var paused = false
+
+    /**
+     * Пауза по «ОК»: кадр и ролик замирают, отсчёт до смены стоит, часы идут.
+     * Стрелки листают и на паузе — сам кадр при этом остаётся на паузе.
+     */
+    private fun togglePause() {
+        paused = !paused
+        slideshow?.paused = paused
+        slideshowView?.setPaused(paused)
+        if (showingVideo) playback.setPaused(paused)
+        Log.i(TAG, if (paused) "пауза" else "продолжаю")
     }
 
     /**
@@ -637,6 +656,10 @@ class FrameDreamService : DreamService() {
         }
         Diary.note("ролик ${prepared.item.name}: $source, ${prepared.item.sizeBytes / 1_048_576} МБ")
         var stalls = 0
+        if (paused) {
+            // Долистали до ролика на паузе — пусть и он стоит, пока не снимут.
+            slideshowView?.post { playback.setPaused(true) }
+        }
         playback.play(
             delivery = prepared.delivery,
             surface = view.videoSurface,

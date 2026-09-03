@@ -92,6 +92,7 @@ class FrameLayer(context: Context) : FrameLayout(context) {
 
     private fun resetMotion() {
         stopDrift()
+        driftPausedAt = 0L
         translationX = 0f; translationY = 0f; scaleX = 1f; scaleY = 1f
         pairHolder.translationX = 0f; pairHolder.translationY = 0f
         pairHolder.scaleX = 1f; pairHolder.scaleY = 1f
@@ -220,6 +221,29 @@ class FrameLayer(context: Context) : FrameLayout(context) {
     fun stopDrift() {
         drift = null
         driftHandler.removeCallbacks(driftTick)
+    }
+
+    private var driftPausedAt = 0L
+
+    /** Ход замирает на месте; при снятии паузы продолжается оттуда же. */
+    fun setDriftPaused(paused: Boolean) {
+        val current = drift ?: return
+        if (paused && driftPausedAt == 0L) {
+            driftPausedAt = System.currentTimeMillis()
+            driftHandler.removeCallbacks(driftTick)
+        } else if (!paused && driftPausedAt != 0L) {
+            val pausedFor = System.currentTimeMillis() - driftPausedAt
+            driftPausedAt = 0L
+            drift = Drift(
+                startedAt = current.startedAt + pausedFor,
+                durationMillis = current.durationMillis,
+                fromX = current.fromX, fromY = current.fromY,
+                toX = current.toX, toY = current.toY,
+                zoomMillis = current.zoomMillis,
+                fromScale = current.fromScale, toScale = current.toScale,
+            )
+            driftHandler.post(driftTick)
+        }
     }
 
     override fun onDetachedFromWindow() {

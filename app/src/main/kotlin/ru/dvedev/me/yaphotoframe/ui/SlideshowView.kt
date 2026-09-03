@@ -168,6 +168,12 @@ class SlideshowView(context: Context) : FrameLayout(context) {
         fade = null
     }
 
+    /** Пауза: ход замирает, значок в углу; часы идут своим чередом. */
+    fun setPaused(paused: Boolean) {
+        photoLayers.forEach { it.setDriftPaused(paused) }
+        overlay.setPaused(paused)
+    }
+
     /** Раздаёт новые настройки слоям: видимый обновится прямо сейчас. */
     fun applySettings(settings: FrameSettings) {
         photoLayers.forEach { it.applySettings(settings, settings.showDurationMillis) }

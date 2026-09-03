@@ -25,6 +25,10 @@ class VideoPlayback(private val context: Context) {
 
     private var player: ExoPlayer? = null
 
+    fun setPaused(paused: Boolean) {
+        player?.playWhenReady = !paused
+    }
+
     fun play(
         delivery: Delivery,
         surface: TextureView,

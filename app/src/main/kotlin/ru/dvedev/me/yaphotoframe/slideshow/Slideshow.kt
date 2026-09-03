@@ -41,6 +41,10 @@ class Slideshow(
 
     private val requested = AtomicInteger(0)
 
+    /** Пауза: кадр висит, пока не снимут; листание пультом работает и на паузе. */
+    @Volatile
+    var paused = false
+
     /**
      * Подготовленное, но не показанное.
      *
@@ -108,9 +112,15 @@ class Slideshow(
      * того, как истечёт уже начатая минута.
      */
     private suspend fun waitOutShow(scope: CoroutineScope) {
-        val startedAt = System.currentTimeMillis()
+        var startedAt = System.currentTimeMillis()
         while (scope.isActive) {
             if (requested.get() != 0) return
+            if (paused) {
+                // Время на паузе не идёт: отсчёт сдвигается вместе с ней.
+                delay(POLL_INTERVAL_MILLIS)
+                startedAt += POLL_INTERVAL_MILLIS
+                continue
+            }
             val elapsed = System.currentTimeMillis() - startedAt
             val remaining = showDurationMillis() - elapsed
             if (remaining <= 0) return
