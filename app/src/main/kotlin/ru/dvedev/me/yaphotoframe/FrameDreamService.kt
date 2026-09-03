@@ -80,7 +80,16 @@ class FrameDreamService : DreamService() {
      *
      * Держим десяток: листают назад на кадр-другой, а не отматывают вечер.
      */
-    private val history = ArrayDeque<ru.dvedev.me.yaphotoframe.media.MediaItem>()
+    /**
+     * История показов с курсором.
+     *
+     * Раньше это была стопка: «назад» снимал верх, а показанное ложилось
+     * обратно. На дне стопки «назад» отдавал пусто, шёл новый кадр, ложился
+     * сверху — и дальше два кадра чередовались при каждом нажатии. Курсор
+     * ходит по списку туда и обратно, а новое добавляется только в конец.
+     */
+    private val history = ArrayList<ru.dvedev.me.yaphotoframe.media.MediaItem>()
+    private var historyCursor = -1
 
     private val playback: VideoPlayback by lazy { VideoPlayback(this) }
 
@@ -364,7 +373,7 @@ class FrameDreamService : DreamService() {
             }
 
             val slideshow = Slideshow(
-                nextItem = engine::advance,
+                nextItem = ::nextItem,
                 previousItem = ::stepBack,
                 preparer = preparer,
                 showDurationMillis = ::holdMillis,
@@ -490,16 +499,34 @@ class FrameDreamService : DreamService() {
      * потому что за спиной уже лежал заготовленный кадр вперёд.
      */
     private fun remember(item: ru.dvedev.me.yaphotoframe.media.MediaItem) {
-        if (history.lastOrNull()?.path == item.path) return
-        history.addLast(item)
-        while (history.size > HISTORY_DEPTH) history.removeFirst()
+        // Показ из истории — назад или вперёд по ней — историю не меняет.
+        if (historyCursor in history.indices && history[historyCursor].path == item.path) return
+        if (history.lastOrNull()?.path == item.path) {
+            historyCursor = history.lastIndex
+            return
+        }
+        history.add(item)
+        while (history.size > HISTORY_DEPTH) history.removeAt(0)
+        historyCursor = history.lastIndex
     }
 
     /** Предыдущий показанный кадр; null — возвращаться некуда. */
     private fun stepBack(): ru.dvedev.me.yaphotoframe.media.MediaItem? {
-        if (history.size < 2) return null
-        history.removeLast()
-        return history.lastOrNull()
+        if (historyCursor <= 0) return null
+        historyCursor--
+        return history[historyCursor]
+    }
+
+    /**
+     * Следующий кадр: сначала вперёд по истории, если владелец листал назад,
+     * и только потом — новый из очереди.
+     */
+    private suspend fun nextItem(): ru.dvedev.me.yaphotoframe.media.MediaItem? {
+        if (historyCursor in 0 until history.lastIndex) {
+            historyCursor++
+            return history[historyCursor]
+        }
+        return engine?.advance()
     }
 
     /** Возвращает, удалось ли показать хоть что-то до построения индекса. */
@@ -604,6 +631,12 @@ class FrameDreamService : DreamService() {
 
     private fun startPlayback(prepared: PreparedVideo) {
         val view = slideshowView ?: return
+        val source = when (prepared.delivery) {
+            is ru.dvedev.me.yaphotoframe.cache.Delivery.Local -> "из кэша"
+            is ru.dvedev.me.yaphotoframe.cache.Delivery.Streamed -> "потоком"
+        }
+        Diary.note("ролик ${prepared.item.name}: $source, ${prepared.item.sizeBytes / 1_048_576} МБ")
+        var stalls = 0
         playback.play(
             delivery = prepared.delivery,
             surface = view.videoSurface,
@@ -621,6 +654,13 @@ class FrameDreamService : DreamService() {
                 slideshowView?.fitVideo(width, height, store.current.frameInset)
             },
             onFirstFrame = { slideshowView?.hideVideoPoster() },
+            onStalled = {
+                // Первые несколько — по одной, дальше счётом, чтобы не забить дневник.
+                stalls++
+                if (stalls <= 3 || stalls % 10 == 0) {
+                    Diary.note("ролик ${prepared.item.name} встал на подкачку ($stalls)")
+                }
+            },
         )
     }
 

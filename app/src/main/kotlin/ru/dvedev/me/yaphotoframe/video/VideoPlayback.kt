@@ -33,8 +33,11 @@ class VideoPlayback(private val context: Context) {
         onFailed: (Throwable) -> Unit,
         onSizeKnown: (Int, Int) -> Unit,
         onFirstFrame: () -> Unit,
+        /** Ролик встал на подкачку уже после старта — владелец это видит как заикание. */
+        onStalled: () -> Unit = {},
     ) {
         stop()
+        var started = false
 
         val uri = when (delivery) {
             is Delivery.Local -> Uri.fromFile(delivery.file)
@@ -48,9 +51,11 @@ class VideoPlayback(private val context: Context) {
             addListener(object : Player.Listener {
                 override fun onPlaybackStateChanged(state: Int) {
                     if (state == Player.STATE_ENDED) onEnded()
+                    if (state == Player.STATE_BUFFERING && started) onStalled()
                 }
 
                 override fun onRenderedFirstFrame() {
+                    started = true
                     onFirstFrame()
                 }
 

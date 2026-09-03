@@ -309,7 +309,7 @@ const FIELDS = [
   { key: 'blurSampleLongSide', name: 'Размытие фона', note: 'меньше пикселей — сильнее размыто',
     min: 2, max: 64, step: 1, get: v => v, set: s => s, show: v => v + ' пикс.' },
 
-  { key: 'minPhotoFraction', name: 'Мельче порога', note: 'снимки уже этой доли экрана не показываются — превью, кропы; сколько таких, видно в «Состоянии»; 0 — показывать всё',
+  { key: 'minPhotoFraction', name: 'Минимальная ширина', note: 'снимки уже этой доли экрана не показываются',
     min: 0, max: 60, step: 5, get: v => Math.round(v * 100), set: s => s / 100,
     show: v => v ? Math.round(v * 100) + ' % экрана' : 'показывать всё' },
 
