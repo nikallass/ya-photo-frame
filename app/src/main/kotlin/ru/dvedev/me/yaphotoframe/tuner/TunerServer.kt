@@ -188,6 +188,12 @@ class TunerServer(
             method == "GET" && path == "/api/settings" ->
                 respond(client, "200 OK", "application/json; charset=utf-8", json(store.current))
 
+            // Значения по умолчанию: странице они нужны, чтобы у каждого
+            // ползунка была своя кнопка «вернуть» и чтобы гасить её, когда
+            // возвращать нечего.
+            method == "GET" && path == "/api/defaults" ->
+                respond(client, "200 OK", "application/json; charset=utf-8", json(FrameSettings()))
+
             method == "POST" && path == "/api/settings" -> {
                 apply(body)
                 respond(client, "200 OK", "application/json; charset=utf-8", json(store.current))

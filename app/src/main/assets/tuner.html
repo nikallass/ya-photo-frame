@@ -43,6 +43,10 @@
   .name { font-size: 15px; }
   .value { color: var(--accent); font-variant-numeric: tabular-nums; font-size: 15px; }
   .note { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .right { display: flex; align-items: center; gap: 10px; }
+  .undo { width: auto; margin: 0; padding: 2px 9px; font-size: 14px; line-height: 1.3;
+          border-radius: 8px; color: var(--muted); }
+  .undo:disabled { opacity: .3; }
   input[type=text] { width: 100%; margin: 10px 0 2px; padding: 12px;
                      background: #0f1116; color: var(--text); font-size: 14px;
                      border: 1px solid var(--line); border-radius: 10px;
@@ -303,7 +307,8 @@ for (const f of FIELDS) {
   const row = document.createElement('div');
   row.className = 'row';
   row.innerHTML = '<div class="head"><span class="name">' + f.name + '</span>' +
-    '<span class="value" id="v-' + f.key + '">—</span></div>' +
+    '<span class="right"><span class="value" id="v-' + f.key + '">—</span>' +
+    undoButton(f.key) + '</span></div>' +
     '<div class="note">' + f.note + '</div>';
   const input = document.createElement('input');
   input.type = 'range'; input.min = f.min; input.max = f.max; input.step = f.step;
@@ -311,6 +316,22 @@ for (const f of FIELDS) {
     state[f.key] = f.set(Number(input.value)); paint(f); schedule();
   });
   row.appendChild(input); rows.appendChild(row); inputs[f.key] = input;
+  row.querySelector('.undo').addEventListener('click', e => {
+    e.stopPropagation();
+    if (!(f.key in defaults)) return;
+    state[f.key] = defaults[f.key]; input.value = f.get(state[f.key]); paint(f); schedule();
+  });
+}
+
+// Кнопка «вернуть как было» у каждого параметра. Гаснет, когда значение и так
+// по умолчанию, — иначе непонятно, есть что возвращать или нет.
+function undoButton(key) {
+  return '<button class="undo" id="u-' + key + '" title="Вернуть значение по умолчанию" disabled>↺</button>';
+}
+let defaults = {};
+function paintUndo(key, same) {
+  const b = document.getElementById('u-' + key);
+  if (b) b.disabled = !(key in defaults) || same;
 }
 
 const togglesBox = document.getElementById('toggles');
@@ -318,16 +339,38 @@ for (const t of TOGGLES) {
   const row = document.createElement('div');
   row.className = 'row';
   row.innerHTML = '<div class="head"><span class="name">' + t.name + '</span>' +
-    '<span class="value" id="v-' + t.key + '">—</span></div>' +
+    '<span class="right"><span class="value" id="v-' + t.key + '">—</span>' +
+    undoButton(t.key) + '</span></div>' +
     '<div class="note">' + t.note + '</div>';
   row.addEventListener('click', () => { state[t.key] = !state[t.key]; paintToggle(t); schedule(); });
+  row.querySelector('.undo').addEventListener('click', e => {
+    e.stopPropagation();
+    if (!(t.key in defaults)) return;
+    state[t.key] = defaults[t.key]; paintToggle(t); schedule();
+  });
   togglesBox.appendChild(row);
 }
 
-const paintToggle = t =>
+function paintToggle(t) {
   document.getElementById('v-' + t.key).textContent = state[t.key] ? 'включено' : 'выключено';
+  paintUndo(t.key, state[t.key] === defaults[t.key]);
+}
 
-const paint = f => document.getElementById('v-' + f.key).textContent = f.show(state[f.key]);
+function paint(f) {
+  document.getElementById('v-' + f.key).textContent = f.show(state[f.key]);
+  // Сравниваем в делениях ползунка: дробные значения после сохранения
+  // возвращаются с телевизора чуть иными, и точное равенство врало бы.
+  paintUndo(f.key, (f.key in defaults) && f.get(state[f.key]) === f.get(defaults[f.key]));
+}
+
+async function loadDefaults() {
+  try {
+    defaults = await (await fetch('/api/defaults')).json();
+    for (const f of FIELDS) paint(f);
+    for (const t of TOGGLES) paintToggle(t);
+  } catch (e) { /* без них кнопки просто остаются погашенными */ }
+}
+loadDefaults();
 
 function render(data) {
   Object.assign(state, data);
