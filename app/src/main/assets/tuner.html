@@ -44,9 +44,11 @@
   .value { color: var(--accent); font-variant-numeric: tabular-nums; font-size: 15px; }
   .note { color: var(--muted); font-size: 12px; margin-top: 2px; }
   .right { display: flex; align-items: center; gap: 10px; }
-  .undo { width: auto; margin: 0; padding: 2px 9px; font-size: 14px; line-height: 1.3;
-          border-radius: 8px; color: var(--muted); }
-  .undo:disabled { opacity: .3; }
+  /* Не кнопка, а значок: рамка и фон рядом с каждым значением утяжеляли страницу. */
+  .undo { width: auto; margin: 0; padding: 0 2px; font-size: 17px; line-height: 1;
+          background: none; border: none; color: var(--muted); }
+  .undo:active { background: none; color: var(--accent); }
+  .undo:disabled { opacity: .18; }
   input[type=text] { width: 100%; margin: 10px 0 2px; padding: 12px;
                      background: #0f1116; color: var(--text); font-size: 14px;
                      border: 1px solid var(--line); border-radius: 10px;
