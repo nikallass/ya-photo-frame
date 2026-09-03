@@ -26,6 +26,11 @@ class GuideView(
     addresses: List<TunerAddress>,
     showingDemo: Boolean,
     donateUrl: String? = null,
+    /**
+     * Добавить шаг про назначение заставки. Нужен на экране приложения: там
+     * непонятно, что делать дальше, а внутри заставки он был бы лишним.
+     */
+    assignStep: Boolean = false,
 ) : LinearLayout(context) {
 
     private val steps = LinearLayout(context).apply {
@@ -75,6 +80,11 @@ class GuideView(
             step(3, "На Яндекс.Диске сделайте папку с фото общедоступной и скопируйте ссылку.")
         )
         steps.addView(step(4, "Вставьте её на вкладке «Настройка» и нажмите «Сменить папку»."))
+        if (assignStep) {
+            steps.addView(
+                step(5, "Назначьте заставку: Настройки телевизора → Заставка → «Фоторамка»."),
+            )
+        }
         steps.addView(note("Там же выбираются вложенные папки и подбирается вид рамки."))
         steps.addView(
             note(

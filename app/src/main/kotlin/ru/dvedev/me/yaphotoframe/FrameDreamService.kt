@@ -288,6 +288,9 @@ class FrameDreamService : DreamService() {
                     publicKey = store.current.folderUrl,
                     http = Http.client,
                     selection = { FolderSelection.of(store.current.selectedFolders) },
+                    onProgress = { files, folders ->
+                        indexing = if (folders < 0) null else Indexing(files, folders)
+                    },
                 ),
                 store = LibraryStore(File(filesDir, LIBRARY_FILE)),
                 folderStore = FolderIndexStore(File(filesDir, FOLDERS_FILE)),
@@ -385,6 +388,12 @@ class FrameDreamService : DreamService() {
         lastSkipAtMillis = now
         Diary.problem("пропускаю ${item.name}: $message")
     }
+
+    /** Идущий обход: сколько файлов и папок пройдено. Null — обход не идёт. */
+    private class Indexing(val files: Int, val folders: Int)
+
+    @Volatile
+    private var indexing: Indexing? = null
 
     /** Крупная подсказка вместо чёрного экрана, когда показывать нечего. */
     private fun showGuide() {
@@ -621,7 +630,13 @@ class FrameDreamService : DreamService() {
             append("\"shown\":").append(index?.shown ?: 0).append(',')
             append("\"failed\":").append(index?.failed ?: 0).append(',')
             append("\"tooSmall\":").append(index?.tooSmall ?: 0).append(',')
-            append("\"syncedAt\":").append(index?.syncedAtMillis ?: 0)
+            append("\"syncedAt\":").append(index?.syncedAtMillis ?: 0).append(',')
+            // Пока идёт обход, страница показывает, сколько уже пройдено:
+            // на большом Диске это минуты, и без счётчика кажется, что рамка
+            // повисла на одном снимке.
+            append("\"indexing\":").append(
+                indexing?.let { "{\"files\":${it.files},\"folders\":${it.folders}}" } ?: "null",
+            )
             append("},")
             append("\"cache\":{")
             append("\"usedBytes\":").append(cache?.usedBytes ?: 0).append(',')

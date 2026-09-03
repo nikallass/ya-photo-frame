@@ -44,6 +44,8 @@ class YandexPublicDiskSource(
     private val pageLimit: Int = DEFAULT_PAGE_LIMIT,
     /** Что показывать: по умолчанию всю расшаренную директорию. */
     private val selection: () -> FolderSelection = { FolderSelection.ALL },
+    /** Сколько файлов и папок уже пройдено — чтобы владелец видел, что обход идёт. */
+    private val onProgress: (files: Int, folders: Int) -> Unit = { _, _ -> },
 ) : MediaSource {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -57,9 +59,12 @@ class YandexPublicDiskSource(
         val queue = ArrayDeque(listOf(ROOT_PATH to 0))
         val visited = mutableSetOf(ROOT_PATH)
 
+        var folders = 0
         while (queue.isNotEmpty() && collected.size < MAX_ITEMS) {
             val (path, depth) = queue.removeFirst()
             val entries = listFolder(path)
+            folders++
+            onProgress(collected.size, folders)
 
             for (entry in entries) {
                 when (entry.type) {
@@ -83,6 +88,7 @@ class YandexPublicDiskSource(
         if (collected.size >= MAX_ITEMS) {
             Log.w(TAG, "обход остановлен на пределе в $MAX_ITEMS элементов")
         }
+        onProgress(collected.size, -1)
         collected
     }
 
@@ -274,7 +280,14 @@ class YandexPublicDiskSource(
         private const val FOLDER_SCAN_PAUSE_MILLIS = 120L
 
         /** Потолок на случай, если в папку положили что-то неожиданно огромное. */
-        private const val MAX_ITEMS = 50_000
+        /**
+         * Потолок обхода. Каждая запись индекса — это ещё и подписанная ссылка
+         * на превью в несколько сотен символов; пятьдесят тысяч записей не
+         * помещались в кучу телевизора вместе с картинками. Двадцать тысяч —
+         * с запасом больше любого разумного альбома; на Диске побольше
+         * отмечают подпапки.
+         */
+        private const val MAX_ITEMS = 20_000
 
         // SimpleDateFormat не потокобезопасен, а листинг разбирается в фоновом потоке.
         private val TIMESTAMP_FORMAT: ThreadLocal<SimpleDateFormat> =

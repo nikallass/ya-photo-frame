@@ -635,7 +635,8 @@ async function loadState() {
     document.getElementById('index').innerHTML =
       kv('всего файлов', i.total) + kv('фотографий', i.photos) + kv('видео', i.videos) +
       kv('нечем показать', i.unshowable) + kv('мельче порога', i.tooSmall) + kv('показано хоть раз', i.shown) +
-      kv('последний обход', i.syncedAt ? new Date(i.syncedAt).toLocaleString('ru-RU') : 'не было');
+      kv('последний обход', i.syncedAt ? new Date(i.syncedAt).toLocaleString('ru-RU') : 'не было') +
+      (d.indexing ? kv('идёт обход', d.indexing.files + ' файлов в ' + d.indexing.folders + ' папках…') : '');
     document.getElementById('cache').innerHTML =
       kv('занято', bytes(c.usedBytes)) + kv('из', bytes(c.budgetBytes)) + kv('файлов', c.files);
     document.getElementById('cachebar').style.width =

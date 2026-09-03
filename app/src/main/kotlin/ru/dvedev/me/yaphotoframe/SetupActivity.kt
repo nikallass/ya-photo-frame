@@ -118,6 +118,7 @@ class SetupActivity : Activity() {
                     else emptyList(),
                     showingDemo = false,
                     donateUrl = Defaults.DONATE_URL,
+                    assignStep = true,
                 )
             )
             container.addView(label("Или настройте прямо здесь, пультом", 20f, TEXT))
