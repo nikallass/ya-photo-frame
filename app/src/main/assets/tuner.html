@@ -258,6 +258,10 @@ const logScale = {
 };
 
 const FIELDS = [
+  { key: 'videoMaxSizeBytes', name: 'Ролик не тяжелее', note: 'тяжелее порога кэша ролик идёт потоком, а тяжёлый поток заикается на Wi-Fi; 0 — без ограничения',
+    min: 0, max: 4096, step: 64, get: v => Math.round(v / 1048576), set: s => s * 1048576,
+    show: v => !v ? 'без ограничения' : v >= 1073741824 ? (v / 1073741824).toFixed(1) + ' ГБ' : Math.round(v / 1048576) + ' МБ' },
+
   { key: 'videoMaxDurationMillis', name: 'Ролик не дольше', note: '0 — до конца, сколько бы ни длился',
     min: 0, max: 1800, step: 10,
     get: v => Math.round(v / 1000), set: s => s * 1000,

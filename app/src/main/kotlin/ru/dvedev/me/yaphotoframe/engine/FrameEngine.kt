@@ -79,6 +79,8 @@ class FrameEngine(
      * кандидатам сразу, до обхода; обход потом лишь подчистит индекс.
      */
     private val selection: () -> FolderSelection = { FolderSelection.ALL },
+    /** Тяжелее скольких байт ролик не брать; ноль — без ограничения. */
+    private val maxVideoBytes: () -> Long = { 0L },
 ) {
 
     private val library = MediaLibrary(source, store, clock)
@@ -107,9 +109,17 @@ class FrameEngine(
         val all = if (includeVideo()) library.showable() else library.showablePhotos()
         val minimum = minPhotoLongSide()
         val chosen = selection()
+        val heaviest = maxVideoBytes()
         return all.filter { entry ->
-            chosen.includes(entry.item.path) && (minimum <= 0 || !entry.isSmallerThan(minimum))
+            chosen.includes(entry.item.path) &&
+                (minimum <= 0 || !entry.isSmallerThan(minimum)) &&
+                (heaviest <= 0 || entry.item.kind != MediaKind.VIDEO || entry.item.sizeBytes <= heaviest)
         }
+    }
+
+    /** Отметка о неудаче снаружи — например, ролик, который не тянет сеть. */
+    fun noteFailure(path: String, reason: String) {
+        synchronized(failures) { failures[path] = reason }
     }
 
     /** Выбрасывает из очереди то, что новый отбор не включает, и набирает заново. */

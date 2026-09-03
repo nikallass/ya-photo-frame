@@ -75,6 +75,8 @@ class SettingsReceiver : BroadcastReceiver() {
                 raw.toLongOrNull()?.let { settings.copy(videoMaxDurationMillis = it) }
             "videoSoundEnabled" ->
                 raw.toBooleanStrictOrNull()?.let { settings.copy(videoSoundEnabled = it) }
+            "videoMaxSizeBytes" ->
+                raw.toLongOrNull()?.let { settings.copy(videoMaxSizeBytes = it) }
             "pairPortraits" ->
                 raw.toBooleanStrictOrNull()?.let { settings.copy(pairPortraits = it) }
             "freshnessWindowDays" ->

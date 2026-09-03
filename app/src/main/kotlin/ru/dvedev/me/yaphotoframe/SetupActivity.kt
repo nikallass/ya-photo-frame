@@ -303,6 +303,10 @@ class SetupActivity : Activity() {
             step = { s, _ -> s.copy(showVideo = !s.showVideo) })
         rows += Row("Ролик не дольше", "0 — до конца", { format(it.videoMaxDurationMillis) },
             step = { s, d -> s.copy(videoMaxDurationMillis = (s.videoMaxDurationMillis + d * 30_000L).coerceAtLeast(0L)) })
+        rows += Row("Ролик не тяжелее", "0 — без ограничения",
+            { if (it.videoMaxSizeBytes <= 0) "без ограничения" else "${it.videoMaxSizeBytes / 1_048_576} МБ" }) { s, d ->
+            s.copy(videoMaxSizeBytes = (s.videoMaxSizeBytes + d * 128L * 1_048_576).coerceAtLeast(0L))
+        }
         rows += Row("Звук в роликах", "по умолчанию нет", { yesNo(it.videoSoundEnabled) },
             step = { s, _ -> s.copy(videoSoundEnabled = !s.videoSoundEnabled) })
         rows += Row("Минимальная ширина", "уже — не показывать",

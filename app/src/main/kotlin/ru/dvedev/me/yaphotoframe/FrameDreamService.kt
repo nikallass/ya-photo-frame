@@ -323,6 +323,7 @@ class FrameDreamService : DreamService() {
                 minPhotoLongSide = ::minPhotoLongSide,
                 measure = { _, file -> imageLongSide(file) },
                 selection = ::currentSelection,
+                maxVideoBytes = { store.current.videoMaxSizeBytes },
                 tuning = {
                     PlaylistTuning(
                         freshnessWindowMillis =
@@ -678,10 +679,17 @@ class FrameDreamService : DreamService() {
             },
             onFirstFrame = { slideshowView?.hideVideoPoster() },
             onStalled = {
-                // Первые несколько — по одной, дальше счётом, чтобы не забить дневник.
                 stalls++
-                if (stalls <= 3 || stalls % 10 == 0) {
+                if (stalls < STALLS_TO_SKIP) {
                     Diary.note("ролик ${prepared.item.name} встал на подкачку ($stalls)")
+                } else if (stalls == STALLS_TO_SKIP) {
+                    // Сеть не тянет битрейт: заикание раз за разом хуже, чем
+                    // пропуск. Пометка видна на странице, чтобы было понятно,
+                    // почему ролик не показался.
+                    val reason = "заикается при потоковом воспроизведении, пропущен"
+                    Diary.problem("ролик ${prepared.item.name} $reason")
+                    engine?.noteFailure(prepared.item.path, reason)
+                    slideshow?.page(1)
                 }
             },
         )
@@ -837,6 +845,9 @@ class FrameDreamService : DreamService() {
         const val CACHE_DIRECTORY = "media"
         const val HISTORY_DEPTH = 10
         const val SKIP_NOTE_INTERVAL_MILLIS = 60_000L
+
+        /** Столько остановок на подкачку — и ролик пропускается. */
+        const val STALLS_TO_SKIP = 3
         /** Сколько держать подсказку, вызванную с пульта. */
         const val GUIDE_FLASH_MILLIS = 10_000L
         /** «Без ограничения» для ролика: сутки, которых не бывает. */

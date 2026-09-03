@@ -48,7 +48,8 @@ class VideoPlayback(private val context: Context) {
             is Delivery.Streamed -> Uri.parse(delivery.url)
         }
 
-        player = ExoPlayer.Builder(context).setLoadControl(loadControl()).build().apply {
+        val streamed = delivery is Delivery.Streamed
+        player = ExoPlayer.Builder(context).setLoadControl(loadControl(streamed)).build().apply {
             setVideoTextureView(surface)
             volume = if (soundEnabled) 1f else 0f
             repeatMode = Player.REPEAT_MODE_OFF
@@ -90,14 +91,16 @@ class VideoPlayback(private val context: Context) {
      * шаг. Рамке столько незачем: ролик либо уже лежит на диске, либо тянется
      * по хорошему каналу, и запаса в десяток секунд с лихвой хватает.
      */
-    private fun loadControl(): LoadControl = DefaultLoadControl.Builder()
+    private fun loadControl(streamed: Boolean): LoadControl = DefaultLoadControl.Builder()
         .setBufferDurationsMs(
-            /* minBufferMs = */ 4_000,
-            /* maxBufferMs = */ 12_000,
-            /* bufferForPlaybackMs = */ 1_000,
-            /* bufferForPlaybackAfterRebufferMs = */ 2_000,
+            /* minBufferMs = */ if (streamed) 15_000 else 4_000,
+            /* maxBufferMs = */ if (streamed) 45_000 else 12_000,
+            /* bufferForPlaybackMs = */ if (streamed) 3_000 else 1_000,
+            // Потоку после остановки — набрать побольше: частые короткие
+            // остановки раздражают сильнее одной длинной.
+            /* bufferForPlaybackAfterRebufferMs = */ if (streamed) 6_000 else 2_000,
         )
-        .setTargetBufferBytes(TARGET_BUFFER_BYTES)
+        .setTargetBufferBytes(if (streamed) STREAM_BUFFER_BYTES else TARGET_BUFFER_BYTES)
         .setPrioritizeTimeOverSizeThresholds(false)
         .build()
 
@@ -112,5 +115,8 @@ class VideoPlayback(private val context: Context) {
     private companion object {
         /** Потолок буфера: на устройстве с двумя гигабайтами больше и не нужно. */
         const val TARGET_BUFFER_BYTES = 24 * 1024 * 1024
+
+        /** Потоку с Диска запас нужнее, но куча всего 192 МБ. */
+        const val STREAM_BUFFER_BYTES = 40 * 1024 * 1024
     }
 }
