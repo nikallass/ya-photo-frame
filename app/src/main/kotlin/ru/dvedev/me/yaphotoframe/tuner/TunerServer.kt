@@ -301,11 +301,7 @@ class TunerServer(
                     ?: current.crossfadeMillis,
                 driftAmplitude = values["driftAmplitude"]?.toFloatOrNull()
                     ?: current.driftAmplitude,
-                driftSpeedPerMinute = values["driftSpeedPerMinute"]?.toFloatOrNull()
-                    ?: current.driftSpeedPerMinute,
                 zoomAmount = values["zoomAmount"]?.toFloatOrNull() ?: current.zoomAmount,
-                zoomSpeedPerMinute = values["zoomSpeedPerMinute"]?.toFloatOrNull()
-                    ?: current.zoomSpeedPerMinute,
                 frameInset = values["frameInset"]?.toFloatOrNull() ?: current.frameInset,
                 edgeMargin = values["edgeMargin"]?.toFloatOrNull() ?: current.edgeMargin,
                 placementStrength = values["placementStrength"]?.toFloatOrNull()
@@ -361,42 +357,17 @@ class TunerServer(
     private fun json(settings: FrameSettings): String = buildString {
         append('{')
         append("\"host\":\"").append(host).append("\",")
-        append("\"version\":\"").append(BuildConfig.VERSION_NAME).append("\",")
-        append("\"folderUrl\":\"").append(settings.folderUrl.replace("\"", "")).append("\",")
-        append("\"showDurationMillis\":").append(settings.showDurationMillis).append(',')
-        append("\"crossfadeMillis\":").append(settings.crossfadeMillis).append(',')
-        append("\"driftAmplitude\":").append(settings.driftAmplitude).append(',')
-        append("\"driftSpeedPerMinute\":").append(settings.driftSpeedPerMinute).append(',')
-        append("\"zoomAmount\":").append(settings.zoomAmount).append(',')
-        append("\"zoomSpeedPerMinute\":").append(settings.zoomSpeedPerMinute).append(',')
-        append("\"frameInset\":").append(settings.frameInset).append(',')
-        append("\"edgeMargin\":").append(settings.edgeMargin).append(',')
-        append("\"placementStrength\":").append(settings.placementStrength).append(',')
-        append("\"backgroundDim\":").append(settings.backgroundDim).append(',')
-        append("\"blurSampleLongSide\":").append(settings.blurSampleLongSide).append(',')
-        append("\"tunerEnabled\":").append(settings.tunerEnabled).append(',')
-        append("\"cacheBudgetBytes\":").append(settings.cacheBudgetBytes).append(',')
-        append("\"cacheItemThresholdBytes\":").append(settings.cacheItemThresholdBytes).append(',')
-        append("\"prefetchCount\":").append(settings.prefetchCount).append(',')
-        append("\"indexRefreshIntervalMillis\":").append(settings.indexRefreshIntervalMillis)
-        append(',')
-        append("\"showVideo\":").append(settings.showVideo).append(',')
-        append("\"videoMaxDurationMillis\":").append(settings.videoMaxDurationMillis).append(',')
-        append("\"videoSoundEnabled\":").append(settings.videoSoundEnabled).append(',')
-        append("\"videoMaxSizeBytes\":").append(settings.videoMaxSizeBytes).append(',')
-        append("\"streamBufferBytes\":").append(settings.streamBufferBytes).append(',')
-        append("\"streamMaxBitrateBps\":").append(settings.streamMaxBitrateBps).append(',')
-        append("\"externalStorageUuid\":\"").append(settings.externalStorageUuid.replace("\"", "")).append("\",")
-        append("\"externalReserveBytes\":").append(settings.externalReserveBytes).append(',')
-        append("\"pairPortraits\":").append(settings.pairPortraits).append(',')
-        append("\"freshnessWindowDays\":").append(settings.freshnessWindowDays).append(',')
-        append("\"minPhotoFraction\":").append(settings.minPhotoFraction).append(',')
-        append("\"showClock\":").append(settings.showClock).append(',')
-        append("\"pauseAutoResumeMillis\":").append(settings.pauseAutoResumeMillis).append(',')
-        append("\"showDate\":").append(settings.showDate).append(',')
-        append("\"selectedFolders\":").append(
-            settings.selectedFolders.joinToString(",", "[", "]") { "\"" + it.replace("\"", "") + "\"" },
-        )
+        append("\"version\":\"").append(BuildConfig.VERSION_NAME).append("\"")
+        for ((key, value) in settings.asMap()) {
+            append(",\"").append(key).append("\":")
+            when (value) {
+                is String -> append('"').append(value.replace("\"", "")).append('"')
+                is Set<*> -> append(
+                    value.joinToString(",", "[", "]") { "\"" + it.toString().replace("\"", "") + "\"" },
+                )
+                else -> append(value.toString())
+            }
+        }
         append('}')
     }
 
@@ -460,8 +431,9 @@ class TunerServer(
         private const val TAG = "YaPhotoFrame"
         private const val PAGE_ASSET = "tuner.html"
 
-        /** Что отдаётся из ресурсов как есть: оболочка приложения на телефоне. */
+        /** Что отдаётся из ресурсов как есть: тексты настроек и оболочка приложения на телефоне. */
         private val STATIC_FILES = setOf(
+            "/settings-ui.json",
             "/manifest.json",
             "/sw.js",
             "/icon-192.png",

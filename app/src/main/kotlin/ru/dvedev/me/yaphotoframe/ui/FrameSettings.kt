@@ -27,32 +27,23 @@ data class FrameSettings(
     val crossfadeMillis: Long = 1_500L,
 
     /**
-     * Длина хода: насколько далеко кадр уезжает всего, долей от ширины экрана.
-     * Три процента — это около шести сантиметров на 43 дюймах.
+     * Путь кадра: насколько далеко он уезжает за показ, долей от ширины экрана.
+     *
+     * Ход растянут на всё время показа: кадр доходит до конца пути ровно к
+     * смене. Отдельной скорости нет — она получалась из двух ручек, и с
+     * умолчаниями кадр никогда не доезжал до заданного. Три процента — это
+     * около шести сантиметров на 43 дюймах за двадцать секунд.
      */
     val driftAmplitude: Float = 0.03f,
-
-    /**
-     * Скорость хода: сколько кадр проходит за минуту, долей от ширины экрана.
-     *
-     * Отдельно от длины, потому что это разные ощущения. Длина решает, насколько
-     * далеко уедет снимок; скорость — насколько заметно он движется. Когда
-     * скорость велика, ход завершается раньше конца показа и кадр замирает;
-     * когда мала — не доходит до края. И то и другое законно.
-     */
-    val driftSpeedPerMinute: Float = 0.03f,
 
     /**
      * Насколько кадр вырастает за показ, долей от своего размера.
      *
      * Медленное приближение — второе, после хода, движение, которое делает
-     * рамку живой. Четыре процента за минуту глазом почти не ловятся, но
+     * рамку живой. Четыре процента за показ глазом почти не ловятся, но
      * замершим кадр уже не кажется. Ноль — без приближения.
      */
     val zoomAmount: Float = 0.04f,
-
-    /** Скорость приближения: на сколько кадр вырастает за минуту. */
-    val zoomSpeedPerMinute: Float = 0.04f,
 
     /** Доля экрана, внутри которой помещается кадр. */
     val frameInset: Float = 0.92f,
@@ -221,6 +212,45 @@ data class FrameSettings(
     /** На сколько кадров вперёд смотреть и что подгружать заранее. */
     val prefetchCount: Int = CachePolicy.DEFAULT_PREFETCH_COUNT,
 ) {
+    /**
+     * Все настройки по ключам JSON, в порядке, в котором их отдаёт страница.
+     *
+     * Единственный перечень ключей: по нему сервер пишет JSON, а тест
+     * сверяет, что у каждого ключа есть тексты на странице.
+     */
+    fun asMap(): Map<String, Any> = linkedMapOf(
+        "folderUrl" to folderUrl,
+        "showDurationMillis" to showDurationMillis,
+        "crossfadeMillis" to crossfadeMillis,
+        "driftAmplitude" to driftAmplitude,
+        "zoomAmount" to zoomAmount,
+        "frameInset" to frameInset,
+        "edgeMargin" to edgeMargin,
+        "placementStrength" to placementStrength,
+        "backgroundDim" to backgroundDim,
+        "blurSampleLongSide" to blurSampleLongSide,
+        "tunerEnabled" to tunerEnabled,
+        "cacheBudgetBytes" to cacheBudgetBytes,
+        "cacheItemThresholdBytes" to cacheItemThresholdBytes,
+        "prefetchCount" to prefetchCount,
+        "indexRefreshIntervalMillis" to indexRefreshIntervalMillis,
+        "showVideo" to showVideo,
+        "videoMaxDurationMillis" to videoMaxDurationMillis,
+        "videoSoundEnabled" to videoSoundEnabled,
+        "videoMaxSizeBytes" to videoMaxSizeBytes,
+        "streamBufferBytes" to streamBufferBytes,
+        "streamMaxBitrateBps" to streamMaxBitrateBps,
+        "externalStorageUuid" to externalStorageUuid,
+        "externalReserveBytes" to externalReserveBytes,
+        "pairPortraits" to pairPortraits,
+        "freshnessWindowDays" to freshnessWindowDays,
+        "minPhotoFraction" to minPhotoFraction,
+        "showClock" to showClock,
+        "pauseAutoResumeMillis" to pauseAutoResumeMillis,
+        "showDate" to showDate,
+        "selectedFolders" to selectedFolders,
+    )
+
     /** То же самое в виде, понятном движку: он про экран ничего не знает. */
     fun cachePolicy(): CachePolicy = CachePolicy(
         budgetBytes = cacheBudgetBytes,
