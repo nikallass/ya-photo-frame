@@ -371,10 +371,9 @@ class SetupActivity : Activity() {
      * Заголовок раздела — обычная подпись без фокуса, пульт её перешагивает.
      */
     private fun buildRows() {
-        val ui = SettingsUi.parse(assets.open(SettingsUi.ASSET).bufferedReader().use { it.readText() })
+        val ui = this.ui
         val editors = editors()
-        val sections = ui.sections.filter { it.items.isNotEmpty() } +
-            SettingsUi.Section(id = "app", title = "Приложение", note = "", items = ui.app)
+        val sections = ui.sections.filter { it.items.isNotEmpty() } + listOfNotNull(ui.app)
         for (section in sections) {
             if (section.title.isNotBlank()) {
                 container.addView(label(section.title, 20f, TEXT).apply { setPadding(0, PADDING, 0, 0) })
@@ -383,7 +382,7 @@ class SetupActivity : Activity() {
             for (item in section.items) {
                 val editor = editors[item.key]
                 if (editor == null) {
-                    Log.w(TAG, "нет редактора для ${item.key}")
+                    Log.e(TAG, "в settings-ui.json есть ${item.key}, а редактора для него нет")
                     continue
                 }
                 val row = Row(item.title, item.note, editor.show, editor.edit, editor.step)
@@ -457,9 +456,14 @@ class SetupActivity : Activity() {
             .show()
     }
 
+    /** Тексты — те же, что на странице; читаются один раз на экран. */
+    private val ui: SettingsUi by lazy {
+        SettingsUi.parse(assets.open(SettingsUi.ASSET).bufferedReader().use { it.readText() })
+    }
+
     private fun buildButtons() {
         container.addView(
-            button("Открыть системный выбор заставки") {
+            button(ui.buttons["dreamSettings"]?.title ?: "Открыть системный выбор заставки") {
                 if (!tryOpenDreamSettings()) {
                     AlertDialog.Builder(this)
                         .setTitle("Системный экран недоступен")
@@ -473,7 +477,7 @@ class SetupActivity : Activity() {
             }
         )
         container.addView(
-            button("Вернуть значения по умолчанию") {
+            button(ui.buttons["reset"]?.title ?: "Вернуть значения по умолчанию") {
                 store.reset()
                 refresh()
             }

@@ -16,8 +16,8 @@ import kotlinx.serialization.json.Json
 @Serializable
 data class SettingsUi(
     val sections: List<Section>,
-    /** Строки, которых на странице нет — только на экране в приложении. */
-    val app: List<Item> = emptyList(),
+    /** Раздел, которого на странице нет — только на экране в приложении. */
+    val app: Section? = null,
     val tabs: Map<String, Block> = emptyMap(),
     val blocks: List<Block> = emptyList(),
     val buttons: Map<String, Block> = emptyMap(),
@@ -51,7 +51,7 @@ data class SettingsUi(
     )
 
     /** Все строки настроек по порядку: секции, затем то, что есть только в приложении. */
-    fun items(): List<Item> = sections.flatMap { it.items } + app
+    fun items(): List<Item> = sections.flatMap { it.items } + app?.items.orEmpty()
 
     fun item(key: String): Item? = items().firstOrNull { it.key == key }
 

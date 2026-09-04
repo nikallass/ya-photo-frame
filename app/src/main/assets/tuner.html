@@ -105,7 +105,7 @@
                overflow: hidden; text-overflow: ellipsis; padding: 0; }
   .list .item.full .dir { direction: ltr; white-space: normal; }
   .list .bad { color: var(--bad); }
-  .list a { color: var(--fg); text-decoration: none; border-bottom: 1px dotted var(--muted); }
+  .list a { color: var(--text); text-decoration: none; border-bottom: 1px dotted var(--muted); }
   .volume { display: flex; gap: 10px; align-items: center; padding: 9px 2px; cursor: pointer; }
   .volume .box { width: 24px; flex: none; color: var(--muted); }
   .volume.on .box { color: var(--accent); }
@@ -126,8 +126,8 @@
   .node.holds > .label::before { content: '•'; margin-right: 6px; }
   .node .arrow, .node .box { gap: 6px; }
   .node { gap: 6px; }
-  .children { margin-left: 10px; border-left: 1px solid var(--line); padding-left: 6px; }
-  .children.deep { margin-left: 0; }
+  .children { margin-left: 4px; border-left: 1px solid var(--line); padding-left: 5px; }
+  .children.deep { margin-left: 0; padding-left: 0; border-left: none; }
   /* Раздел: заголовок и одна строка под ним; строки настроек идут карточками ниже. */
   .section { margin: 22px 0 10px; }
   .section:first-child { margin-top: 0; }
@@ -135,9 +135,12 @@
   .snote { color: var(--muted); font-size: 13px; margin-top: 2px; }
   /* Значок справки: маленький кружок после названия. Тап разворачивает текст
      под строкой; на компьютере тот же текст всплывает по наведению. */
+  /* Название и значок — одна строка, выровненная по середине: с baseline
+     кружок проваливался ниже текста. */
+  .name, .stitle { display: inline-flex; align-items: center; }
   .info { display: inline-flex; width: 18px; height: 18px; margin-left: 8px; border-radius: 50%;
           border: 1px solid var(--muted); color: var(--muted); font: italic 12px/1 Georgia, serif;
-          align-items: center; justify-content: center; vertical-align: -3px; cursor: pointer;
+          align-items: center; justify-content: center; flex: none; cursor: pointer;
           user-select: none; }
   .info.open { border-color: var(--accent); color: var(--accent); }
   .help { color: var(--text); opacity: .9; font-size: 13px; line-height: 1.45; margin-top: 10px;
@@ -400,11 +403,17 @@ function paintUndo(key, same) {
   if (b) b.disabled = !(key in defaults) || same;
 }
 
+// Шапка блока: название со значком справки, справа — что передали, под ней
+// строка мелким. Одна на строки настроек, разделы, блоки состояния и кнопки.
+function headHtml(text, right) {
+  return '<div class="head"><span class="name">' + escapeHtml(text.title) + info(text.help) + '</span>' +
+    (right || '') + '</div>' +
+    (text.note ? '<div class="note">' + escapeHtml(text.note) + '</div>' : '');
+}
+
 function rowHead(item) {
-  return '<div class="head"><span class="name">' + escapeHtml(item.title) + info(item.help) + '</span>' +
-    '<span class="right"><span class="value" id="v-' + item.key + '">—</span>' +
-    undoButton(item.key) + '</span></div>' +
-    '<div class="note">' + escapeHtml(item.note) + '</div>';
+  return headHtml(item, '<span class="right"><span class="value" id="v-' + item.key + '">—</span>' +
+    undoButton(item.key) + '</span>');
 }
 
 function sliderRow(item) {
@@ -446,8 +455,7 @@ function toggleRow(item) {
 function folderRow(item) {
   const row = document.createElement('div');
   row.className = 'row';
-  row.innerHTML = '<div class="head"><span class="name">' + escapeHtml(item.title) + info(item.help) + '</span></div>' +
-    '<div class="note">' + escapeHtml(item.note) + '</div>' +
+  row.innerHTML = headHtml(item) +
     '<input type="text" id="folder" autocapitalize="off" autocorrect="off" spellcheck="false">' +
     '<button id="savefolder">Задать папку</button>' + helpBox(item.help);
   return row;
@@ -456,8 +464,7 @@ function folderRow(item) {
 function volumeRow(item) {
   const row = document.createElement('div');
   row.className = 'row';
-  row.innerHTML = '<div class="head"><span class="name">' + escapeHtml(item.title) + info(item.help) + '</span></div>' +
-    '<div class="note">' + escapeHtml(item.note) + '</div>' +
+  row.innerHTML = headHtml(item) +
     '<div class="list" id="volumes"><div class="empty">…</div></div>' + helpBox(item.help);
   return row;
 }
@@ -524,8 +531,7 @@ function buildState() {
     const row = document.querySelector('[data-block="' + b.id + '"]');
     if (!row) continue;
     const head = row.querySelector('.bhead');
-    head.innerHTML = '<div class="head"><span class="name">' + escapeHtml(b.title) + info(b.help) + '</span></div>' +
-      (b.note ? '<div class="note">' + escapeHtml(b.note) + '</div>' : '') + helpBox(b.help);
+    head.innerHTML = headHtml(b) + helpBox(b.help);
     wireInfo(head);
   }
   buttonBlock(document.getElementById('refreshblock'), 'refresh');
@@ -733,7 +739,7 @@ function nodeView(name, path, depth) {
   const checked = selected.has(path) || inherited;
   if (selected.has(path)) row.classList.add('on');
   if (inherited) row.classList.add('inherited');
-  if (!checked && holdsSelected(path)) row.classList.add('holds');
+  if (!checked && path !== '/' && holdsSelected(path)) row.classList.add('holds');
 
   const kids = loaded.get(path);
   const open = expanded.has(path);
@@ -984,6 +990,19 @@ const linked = items => items.length
       '<div class="dir"><bdi>' + escapeHtml(dirOf(x.path)) + '</bdi></div></div>').join('')
   : '<div class="empty">пусто</div>';
 
+// «Не загрузилось» приходит строками «путь — причина»: имя файла строкой,
+// папка серым, причина после имени.
+const failed = items => items.length
+  ? items.map(x => {
+      const cut = x.indexOf(' — ');
+      const path = cut < 0 ? x : x.slice(0, cut), reason = cut < 0 ? '' : x.slice(cut + 3);
+      const name = path.slice(path.lastIndexOf('/') + 1);
+      return '<div class="item bad" onclick="this.classList.toggle(\'full\')">' + escapeHtml(name) +
+        (reason ? ' <small>' + escapeHtml(reason) + '</small>' : '') +
+        '<div class="dir"><bdi>' + escapeHtml(dirOf(path)) + '</bdi></div></div>';
+    }).join('')
+  : '<div class="empty">пусто</div>';
+
 async function loadState() {
   try {
     const d = await (await fetch('/api/state')).json();
@@ -1036,7 +1055,7 @@ async function loadState() {
 
     document.getElementById('queue').innerHTML = linked(d.queue || []);
     document.getElementById('recent').innerHTML = linked(d.recent || []);
-    document.getElementById('failures').innerHTML = list(d.failures || [], true);
+    document.getElementById('failures').innerHTML = failed(d.failures || []);
     document.getElementById('log').innerHTML = list(d.log);
     status.textContent = 'показов всего: ' + d.shows + ' · обновлено ' +
       new Date().toLocaleTimeString('ru-RU');

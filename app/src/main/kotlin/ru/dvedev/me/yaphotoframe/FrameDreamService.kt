@@ -323,7 +323,7 @@ class FrameDreamService : DreamService() {
         File(filesDir, LIBRARY_FILE).delete()
         File(cacheDir, CACHE_DIRECTORY).deleteRecursively()
         StreamCache.clear(this)
-        // Ролики прежней папки на носителе тоже не нужны — дерево там её.
+        // Ролики прежней папки на флешке тоже не нужны — дерево там её.
         scope.launch(Dispatchers.IO) {
             runCatching { externalStore()?.let { store -> store.keys().forEach(store::remove) } }
         }
@@ -339,7 +339,7 @@ class FrameDreamService : DreamService() {
     private var externalMissingNoted = false
 
     /**
-     * Носитель под тяжёлые ролики, если он выбран и подключён.
+     * Флешка под тяжёлые ролики, если он выбран и подключён.
      *
      * Движок спрашивает его на каждый ролик при наборе очереди, а перечисление
      * томов — обращение к системе; поэтому ответ живёт несколько секунд.
@@ -387,7 +387,7 @@ class FrameDreamService : DreamService() {
         return externalCurrent
     }
 
-    /** Тома для страницы настройки: что можно выбрать носителем. */
+    /** Тома для страницы настройки: что можно выбрать флешкой. */
     private fun storageJson(): String {
         val volumes = runCatching { media.volumes() }.getOrDefault(emptyList())
         return "{\"chosen\":\"" + escape(store.current.externalStorageUuid) + "\",\"volumes\":" +
@@ -1122,7 +1122,7 @@ class FrameDreamService : DreamService() {
         }
     }
 
-    /** Закачка на носитель — в дневник: по ней видно и канал, и почему ролик ждёт. */
+    /** Закачка на флешка — в дневник: по ней видно и канал, и почему ролик ждёт. */
     private fun reportArchive(event: ArchiveEvent) {
         when (event) {
             is ArchiveEvent.Started ->

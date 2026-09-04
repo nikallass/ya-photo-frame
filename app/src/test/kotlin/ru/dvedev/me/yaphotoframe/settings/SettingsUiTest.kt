@@ -40,8 +40,9 @@ class SettingsUiTest {
             if (item.note.length > 70) problems += item.key + ": строка длиннее 70 знаков"
             if ('\n' in item.note) problems += item.key + ": перенос в строке"
         }
-        for (section in ui.sections) {
+        for (section in ui.sections + listOfNotNull(ui.app)) {
             if (section.id != "folder" && section.title.isBlank()) problems += section.id + ": раздел без заголовка"
+            if (section.id != "folder" && section.note.isBlank()) problems += section.id + ": раздел без строки"
             if (section.note.length > 100) problems += section.id + ": подзаголовок длиннее 100 знаков"
         }
         assertEquals(emptyList<String>(), problems)

@@ -110,7 +110,7 @@ class FrameEngine(
     private val channelBps: () -> Long = { 0L },
     /** Сколько ролика показывается; ноль — целиком. */
     private val maxVideoDurationMillis: () -> Long = { 0L },
-    /** Носитель под тяжёлые ролики; null — не выбран или не подключён. */
+    /** Флешка под тяжёлые ролики; null — не выбран или не подключён. */
     private val external: () -> ExternalStore? = { null },
     private val onArchive: (ArchiveEvent) -> Unit = {},
 ) {
@@ -202,7 +202,7 @@ class FrameEngine(
     /** Битрейт ролика, если длительность уже измерена. */
     fun bitrateOf(path: String): Long? = entryOf(path)?.bitrateBps
 
-    /** Сколько роликов ждут носителя: тяжелее канала, а класть некуда. */
+    /** Сколько роликов ждут флешки: тяжелее канала, а класть некуда. */
     fun waitingForStorage(): Int {
         if (!includeVideo()) return 0
         val chosen = selection()
@@ -512,7 +512,7 @@ class FrameEngine(
                     }
 
                     PlannedDelivery.Archive -> {
-                        // На носитель — по одному: канал один, и два ролика
+                        // На флешка — по одному: канал один, и два ролика
                         // разом приехали бы позже, чем по очереди.
                         if (isWaiting(item) && !archiveRequested) {
                             archiveRequested = true
@@ -523,7 +523,7 @@ class FrameEngine(
                     // Замер не удался и сейчас — попробуем в следующий раз.
                     PlannedDelivery.Probe -> Unit
 
-                    // Носитель пропал, пока ролик стоял в очереди.
+                    // Флешка пропал, пока ролик стоял в очереди.
                     PlannedDelivery.Skip -> queueLock.withLock { queue.remove(item.path) }
                 }
             } catch (e: Exception) {
@@ -560,14 +560,14 @@ class FrameEngine(
         }
         PlannedDelivery.Archive -> {
             val store = checkNotNull(external()) { "флешка отключена" }
-            // Лежащий на носителе не требует даже ссылки: за ней ходят к API.
+            // Лежащий на флешке не требует даже ссылки: за ней ходят к API.
             if (store.has(item.path)) Delivery.Local(store.file(item.path))
             else Delivery.Local(store.fetch(item, source.downloadUrl(item)) {})
         }
         PlannedDelivery.Skip -> error("ролик ${item.name} тяжелее сети, а флешки нет")
     }
 
-    /** Ролик стоит в очереди, но на экран пока не идёт: ждёт замера, подкачки или носителя. */
+    /** Ролик стоит в очереди, но на экран пока не идёт: ждёт замера, подкачки или флешки. */
     private fun isWaiting(item: MediaItem): Boolean = when (deliveryPlan(item)) {
         PlannedDelivery.Probe -> true
         PlannedDelivery.Stream -> isPendingStream(item)
@@ -609,10 +609,10 @@ class FrameEngine(
         }
     }
 
-    /** Что качается на носитель прямо сейчас; null — ничего. */
+    /** Что качается на флешка прямо сейчас; null — ничего. */
     fun archiveState(): ArchiveState? = archiving
 
-    /** Дожидается закачки на носитель — для тестов. */
+    /** Дожидается закачки на флешка — для тестов. */
     suspend fun awaitArchiving() {
         synchronized(archiveLock) { archiveJob }?.join()
     }
@@ -729,7 +729,7 @@ class FrameEngine(
      *
      * Лёгкое — в кэш. Что не тяжелее канала — потоком, как и то, чья
      * показываемая часть целиком помещается в подкачку: такое не заикнётся.
-     * Остальное — на носитель, а без носителя — мимо: заикающийся ролик хуже
+     * Остальное — на флешка, а без флешки — мимо: заикающийся ролик хуже
      * пропущенного. Пока длительность не измерена, битрейт неизвестен, и
      * ролик ждёт замера.
      */
@@ -749,7 +749,7 @@ class FrameEngine(
             if (shownBytes <= primeBudgetBytes() - PRIME_HEADROOM_BYTES) return PlannedDelivery.Stream
         }
         if (external() == null) return PlannedDelivery.Skip
-        // Не доехавший до носителя (например, крупнее, чем принимает FAT32) второй
+        // Не доехавший до флешки (например, крупнее, чем принимает FAT32) второй
         // раз до перезапуска не качается: узнавать это на четвёртом гигабайте дорого.
         if (synchronized(archiveLock) { item.path in archiveFailed }) return PlannedDelivery.Skip
         return PlannedDelivery.Archive
@@ -800,12 +800,12 @@ class FrameEngine(
                 iterator.remove()
                 continue
             }
-            // Носитель пропал, пока ролик стоял в очереди.
+            // Флешка пропал, пока ролик стоял в очереди.
             if (deliveryPlan(entry.item) == PlannedDelivery.Skip) {
                 iterator.remove()
                 continue
             }
-            // Ожидающий (замера, подкачки, носителя) стоит на месте, показ идёт
+            // Ожидающий (замера, подкачки, флешки) стоит на месте, показ идёт
             // мимо него: как приедет — выйдет на экран.
             if (isWaiting(entry.item)) continue
             iterator.remove()
@@ -920,7 +920,7 @@ data class CacheState(
 data class PrefetchOutcome(val fetched: Int, val streamed: Int, val evicted: Int)
 
 /**
- * Носитель: тяжёлые ролики лежат на нём целиком, под своими путями.
+ * Флешка: тяжёлые ролики лежат на нём целиком, под своими путями.
  *
  * Ключ — путь на хранилище, так что на флешке получается то же дерево, что и
  * на Диске: её можно вынуть и показать где угодно.
@@ -943,7 +943,7 @@ interface ExternalStore {
     fun evict(): Int
 }
 
-/** Ход закачки на носитель. */
+/** Ход закачки на флешка. */
 class ArchiveState(val item: MediaItem, val wantedBytes: Long, val startedAtMillis: Long) {
     @Volatile
     var doneBytes: Long = 0L
