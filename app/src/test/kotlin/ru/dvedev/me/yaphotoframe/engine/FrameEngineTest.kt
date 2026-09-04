@@ -914,6 +914,28 @@ class FrameEngineTest {
     }
 
     @Test
+    fun `пока на экране ролик, закачка на флешку не начинается`() = runTest {
+        switchToCacheFolder()
+        val store = archive()
+        val engine = library(
+            pageLimit = 50, includeVideo = true, channelBps = 50_000_000L,
+            prober = prober(6_000_000_000L to 100_000L), external = { store },
+        )
+        engine.sync()
+
+        engine.holdDownloads(true)
+        engine.prefetch()
+        engine.awaitArchiving()
+        assertTrue("ролик на экране — на флешку ничего не качается", !store.has("/огромное.mov"))
+        assertTrue("но ждёт в очереди", engine.upcoming().any { it.name == "огромное.mov" })
+
+        engine.holdDownloads(false)
+        engine.prefetch()
+        engine.awaitArchiving()
+        assertTrue("после ролика закачка пошла", store.has("/огромное.mov"))
+    }
+
+    @Test
     fun `тяжёлый ролик уезжает на носитель, ждёт закачки и идёт с него`() = runTest {
         switchToCacheFolder()
         val store = archive()

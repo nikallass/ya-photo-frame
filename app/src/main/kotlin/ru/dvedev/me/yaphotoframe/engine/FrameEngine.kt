@@ -159,11 +159,32 @@ class FrameEngine(
     private var primedWaiting: String? = null
 
     /**
-     * Подкачку придерживают, пока на экране ролик потоком: его хвост идёт по
-     * той же сети, и подкачка следующего отбирала бы у него канал.
+     * Пока на экране ролик, ничего тяжёлого не качается: ни подкачка, ни
+     * закачка на флешку, ни лёгкие ролики в кэш. Ролик из кэша читается с
+     * той же памяти телевизора, куда шла бы подкачка, и на этом декодер
+     * однажды выдал кадр зелёными полосами; потоковый делит с ней сеть.
+     * Снимки (сотни килобайт) качаются как обычно — очередь не должна
+     * опустеть за минуту ролика.
      */
     @Volatile
-    var primingHeld = false
+    private var downloadsHeld = false
+
+    /**
+     * Придержать или отпустить закачки. При удержании идущая подкачка
+     * отменяется — буфер потока помнит скачанное, и после ролика она
+     * продолжится с того же места. Закачка на флешку доигрывает: её файл
+     * пишется на флешку, а не в память телевизора, а отмена потеряла бы
+     * скачанное.
+     */
+    fun holdDownloads(held: Boolean) {
+        downloadsHeld = held
+        if (!held) return
+        synchronized(primeLock) {
+            primeJob?.cancel()
+            primeJob = null
+            primeJobPath = null
+        }
+    }
 
     private val archiveLock = Any()
     private var archiveJob: Job? = null
@@ -497,7 +518,8 @@ class FrameEngine(
                     plan = deliveryPlan(item)
                 }
                 when (plan) {
-                    PlannedDelivery.Cached -> {
+                    // Лёгкий ролик в кэш — тоже закачка, при ролике на экране подождёт.
+                    PlannedDelivery.Cached -> if (downloadsHeld && item.kind != MediaKind.PHOTO) Unit else {
                         ensureCached(item)
                         fetched++
                         // Размер стал известен только сейчас: мелочь из
@@ -517,7 +539,7 @@ class FrameEngine(
                     PlannedDelivery.Archive -> {
                         // На флешка — по одному: канал один, и два ролика
                         // разом приехали бы позже, чем по очереди.
-                        if (isWaiting(item) && !archiveRequested) {
+                        if (isWaiting(item) && !archiveRequested && !downloadsHeld) {
                             archiveRequested = true
                             startArchiving(item)
                         }
@@ -636,7 +658,7 @@ class FrameEngine(
     }
 
     private fun startPriming(item: MediaItem) {
-        if (primingHeld) return
+        if (downloadsHeld) return
         synchronized(primeLock) {
             // Подкачанный ждёт показа — буфер занят им, следующий подождёт.
             if (primedWaiting != null && primedWaiting != item.path) return
