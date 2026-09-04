@@ -336,17 +336,9 @@ const FIELDS = [
     min: 0, max: 300, step: 1, get: v => Math.round(v * 1000), set: s => s / 1000,
     show: v => (v * 100).toFixed(1) + ' % ширины' },
 
-  { key: 'driftSpeedPerMinute', name: 'Скорость хода', note: 'сколько проходит за минуту',
-    min: 0, max: 600, step: 1, get: v => Math.round(v * 1000), set: s => s / 1000,
-    show: v => (v * 100).toFixed(1) + ' % в минуту' },
-
   { key: 'zoomAmount', name: 'Приближение', note: 'на сколько кадр вырастает за показ; 0 — без приближения',
     min: 0, max: 30, step: 1, get: v => Math.round(v * 100), set: s => s / 100,
     show: v => v ? Math.round(v * 100) + ' %' : 'нет' },
-
-  { key: 'zoomSpeedPerMinute', name: 'Скорость приближения', note: 'на сколько вырастает за минуту',
-    min: 0, max: 60, step: 1, get: v => Math.round(v * 100), set: s => s / 100,
-    show: v => Math.round(v * 100) + ' % в минуту' },
 
   { key: 'frameInset', name: 'Размер кадра', note: 'доля экрана, в которую вписан снимок',
     min: 30, max: 100, step: 1, get: v => Math.round(v * 100), set: s => s / 100,

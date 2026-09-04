@@ -112,34 +112,25 @@ class FrameLayer(context: Context) : FrameLayout(context) {
      * свободного места с обеих сторон, а смещение по золотому сечению одну
      * сторону как раз поджимает — в итоге заданная длина обрезалась вдвое.
      *
-     * Длина и скорость заданы порознь, поэтому время выводится из них, а не из
-     * длительности показа. Когда скорость велика, ход завершается раньше конца
-     * показа и кадр замирает; когда мала — не доходит до конца. И то и другое
-     * законно, это и есть две разные ручки.
+     * Ход и рост занимают всё [durationMillis]: кадр доходит до заданного пути
+     * и роста ровно к смене. Расчёт целей — в [DriftPlan].
      */
     fun startDrift(durationMillis: Long, fromCurrentPosition: Boolean = false) {
         val bounds = contentBounds() ?: return
         val direction = placement.driftDirection()
-
-        // Приближение раздвигает кадр на половину прироста в каждую сторону —
-        // столько же надо оставить до края.
-        val zoom = settings.zoomAmount.coerceAtLeast(0f)
-        val growX = (bounds.right - bounds.left) * zoom / 2
-        val growY = (bounds.bottom - bounds.top) * zoom / 2
-        val roomX = (if (direction.first > 0) width - bounds.right else bounds.left) - growX
-        val roomY = (if (direction.second > 0) height - bounds.bottom else bounds.top) - growY
-
-        val wanted = width * settings.driftAmplitude
-        val travelX = min(wanted, roomX.coerceAtLeast(0f))
-        val travelY = min(wanted, roomY.coerceAtLeast(0f))
-
-        val speed = settings.driftSpeedPerMinute.coerceAtLeast(MIN_DRIFT_SPEED)
-        val distance = maxOf(travelX, travelY) / width
-        val driftMillis = (distance / speed * MILLIS_PER_MINUTE).toLong()
-            .coerceIn(MIN_DRIFT_MILLIS, durationMillis)
-        val zoomSpeed = settings.zoomSpeedPerMinute.coerceAtLeast(MIN_DRIFT_SPEED)
-        val zoomMillis = (zoom / zoomSpeed * MILLIS_PER_MINUTE).toLong()
-            .coerceIn(MIN_DRIFT_MILLIS, durationMillis)
+        val plan = DriftPlan.compute(
+            width = width,
+            height = height,
+            bounds = DriftPlan.Box(
+                bounds.left.toFloat(), bounds.top.toFloat(),
+                bounds.right.toFloat(), bounds.bottom.toFloat(),
+            ),
+            directionX = direction.first,
+            directionY = direction.second,
+            amplitude = settings.driftAmplitude,
+            zoom = settings.zoomAmount,
+            durationMillis = durationMillis,
+        )
 
         val startX = if (fromCurrentPosition) offsetX() else 0f
         val startY = if (fromCurrentPosition) offsetY() else 0f
@@ -152,14 +143,13 @@ class FrameLayer(context: Context) : FrameLayout(context) {
         this.pivotX = pivotX; this.pivotY = pivotY
         drift = Drift(
             startedAt = SystemClock.elapsedRealtime(),
-            durationMillis = driftMillis,
+            durationMillis = plan.durationMillis,
             fromX = startX,
             fromY = startY,
-            toX = travelX * direction.first,
-            toY = travelY * direction.second,
-            zoomMillis = zoomMillis,
+            toX = plan.travelX,
+            toY = plan.travelY,
             fromScale = startScale,
-            toScale = 1f + zoom,
+            toScale = plan.toScale,
         )
         driftTick.run()
     }
@@ -171,7 +161,6 @@ class FrameLayer(context: Context) : FrameLayout(context) {
         val fromY: Float,
         val toX: Float,
         val toY: Float,
-        val zoomMillis: Long,
         val fromScale: Float,
         val toScale: Float,
     )
@@ -192,10 +181,9 @@ class FrameLayer(context: Context) : FrameLayout(context) {
             val current = drift ?: return
             val elapsed = (SystemClock.elapsedRealtime() - current.startedAt).toFloat()
             val progress = (elapsed / current.durationMillis).coerceIn(0f, 1f)
-            val zoomProgress = (elapsed / current.zoomMillis).coerceIn(0f, 1f)
             val x = current.fromX + (current.toX - current.fromX) * progress
             val y = current.fromY + (current.toY - current.fromY) * progress
-            val scale = current.fromScale + (current.toScale - current.fromScale) * zoomProgress
+            val scale = current.fromScale + (current.toScale - current.fromScale) * progress
 
             // Пока слой лежит в аппаратном буфере (идёт растворение), двигаем и
             // растим слой целиком: это бесплатно, буфер не перерисовывается.
@@ -213,7 +201,7 @@ class FrameLayer(context: Context) : FrameLayout(context) {
                 pairHolder.scaleX = scale / scaleX
                 pairHolder.scaleY = scale / scaleY
             }
-            if (progress < 1f || zoomProgress < 1f) {
+            if (progress < 1f) {
                 driftHandler.postDelayed(this, DRIFT_TICK_MILLIS)
             } else {
                 drift = null
@@ -243,7 +231,6 @@ class FrameLayer(context: Context) : FrameLayout(context) {
                 durationMillis = current.durationMillis,
                 fromX = current.fromX, fromY = current.fromY,
                 toX = current.toX, toY = current.toY,
-                zoomMillis = current.zoomMillis,
                 fromScale = current.fromScale, toScale = current.toScale,
             )
             driftHandler.post(driftTick)
@@ -396,10 +383,6 @@ class FrameLayer(context: Context) : FrameLayout(context) {
     private companion object {
         /** Около двенадцати шагов в секунду. */
         const val DRIFT_TICK_MILLIS = 80L
-
-        const val MILLIS_PER_MINUTE = 60_000f
-        const val MIN_DRIFT_SPEED = 0.0005f
-        const val MIN_DRIFT_MILLIS = 200L
 
         /** Просвет между снимками в паре, долей от ширины экрана. */
         const val PAIR_GAP = 0.015f

@@ -53,4 +53,10 @@ class FrameSettingsSanitizeTest {
         assertEquals(0.6f, sanitized.minPhotoFraction, 1e-6f)
         assertEquals(50, sanitized.prefetchCount)
     }
+
+    @Test
+    fun `умолчания проходят нормализацию без изменений`() {
+        // Ползунков скорости больше нет; всё, что осталось, лежит в границах.
+        assertEquals(FrameSettings(), FrameSettings().sanitized())
+    }
 }
