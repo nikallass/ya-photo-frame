@@ -363,7 +363,7 @@ class FrameDreamService : DreamService() {
         if (volume == null || root == null || !volume.usable) {
             if (externalCurrent != null || !externalMissingNoted) {
                 val why = volume?.problem?.let { ": $it" } ?: " не подключён"
-                Diary.note("носитель ${volume?.label ?: wanted}$why — ролики тяжелее канала пропускаются")
+                Diary.note("флешка ${volume?.label ?: wanted}$why — ролики тяжелее сети пропускаются")
                 externalMissingNoted = true
             }
             externalCurrent = null
@@ -382,7 +382,7 @@ class FrameDreamService : DreamService() {
             externalCurrent = ArchiveStore(cache, MediaFetcher(Http.client, cache))
             externalUuid = wanted
             externalMissingNoted = false
-            Diary.note("носитель ${volume.label}: ${root.path}")
+            Diary.note("флешка ${volume.label}: ${root.path}")
         }
         return externalCurrent
     }
@@ -1126,12 +1126,12 @@ class FrameDreamService : DreamService() {
     private fun reportArchive(event: ArchiveEvent) {
         when (event) {
             is ArchiveEvent.Started ->
-                Diary.note("ролик ${event.item.name}: качаю на носитель ${event.item.sizeBytes / 1_048_576} МБ")
+                Diary.note("ролик ${event.item.name}: качаю на флешку ${event.item.sizeBytes / 1_048_576} МБ")
             is ArchiveEvent.Finished -> {
                 val seconds = maxOf(1L, event.tookMillis / 1000)
                 val speed = event.item.sizeBytes / 1_048_576.0 / seconds
                 Diary.note(
-                    "ролик ${event.item.name} на носителе за ${formatSeconds(seconds)}, " +
+                    "ролик ${event.item.name} на флешке за ${formatSeconds(seconds)}, " +
                         "${"%.1f".format(speed)} МБ/с",
                 )
             }
@@ -1139,11 +1139,11 @@ class FrameDreamService : DreamService() {
                 val tooLarge = event.reason.contains("too large", ignoreCase = true) ||
                     event.reason.contains("EFBIG")
                 val why = if (tooLarge) {
-                    "файл больше, чем принимает носитель (FAT32 берёт до 4 ГБ — нужна exFAT или NTFS)"
+                    "файл больше, чем принимает флешка (FAT32 берёт до 4 ГБ — нужна exFAT или NTFS)"
                 } else {
                     event.reason
                 }
-                Diary.problem("ролик ${event.item.name} не доехал до носителя: $why")
+                Diary.problem("ролик ${event.item.name} не доехал до флешки: $why")
             }
         }
     }

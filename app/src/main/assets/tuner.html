@@ -119,6 +119,23 @@
   .node.inherited { color: var(--muted); }
   .node .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .children { margin-left: 22px; border-left: 1px solid var(--line); padding-left: 8px; }
+  /* Раздел: заголовок и одна строка под ним; строки настроек идут карточками ниже. */
+  .section { margin: 22px 0 10px; }
+  .section:first-child { margin-top: 0; }
+  .stitle { font-size: 17px; font-weight: 600; }
+  .snote { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  /* Значок справки: маленький кружок после названия. Тап разворачивает текст
+     под строкой; на компьютере тот же текст всплывает по наведению. */
+  .info { display: inline-flex; width: 18px; height: 18px; margin-left: 8px; border-radius: 50%;
+          border: 1px solid var(--muted); color: var(--muted); font: italic 12px/1 Georgia, serif;
+          align-items: center; justify-content: center; vertical-align: -3px; cursor: pointer;
+          user-select: none; }
+  .info.open { border-color: var(--accent); color: var(--accent); }
+  .help { color: var(--text); opacity: .9; font-size: 13px; line-height: 1.45; margin-top: 10px;
+          padding: 10px 12px; background: #0f1116; border-radius: 10px; }
+  .help[hidden] { display: none; }
+  .bnote { margin: 6px 4px 0; }
+  .bblock { margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -133,39 +150,13 @@
 </div>
 
 <div id="tune">
-  <div class="hint">Двигайте ползунок — экран меняется сразу, выходить из заставки не нужно.</div>
-  <div class="row">
-    <div class="head"><span class="name">Папка на Яндекс.Диске</span></div>
-    <div class="note">публичная ссылка; смена папки сбрасывает индекс и кэш</div>
-    <input type="text" id="folder" autocapitalize="off" autocorrect="off" spellcheck="false">
-    <button id="savefolder">Задать папку</button>
-  </div>
-  <div class="row">
-    <div class="head"><span class="name">Носитель</span></div>
-    <div class="note">флешка под тяжёлые ролики: ролик тяжелее канала качается на неё один раз и идёт без
-      заиканий; без носителя такие ролики пропускаются. Вставьте флешку в телевизор и выберите её.
-      Файлы лежат в папке <b>Android/media/ru.dvedev.me.yaphotoframe/Фоторамка</b> — обычным деревом, как на Я.Диске.
-      Файловая система — exFAT (лучше всего), NTFS или FAT32; FAT32 не умеет файлы больше 4 ГБ, такие ролики
-      на неё не поедут. Если телевизор при вставке предложит «настроить как внутреннюю память» — откажитесь,
-      выберите режим «съёмный накопитель».</div>
-    <div class="list" id="volumes"><div class="empty">…</div></div>
-  </div>
-  <div id="toggles"></div>
-  <div id="rows"></div>
-  <button id="reset">Вернуть значения по умолчанию</button>
-  <div class="hint" style="margin-top:18px">Перенос на другой телевизор: сохраните файл
-    настроек здесь, откройте страницу нового телевизора и загрузите его там — вместе с
-    папкой и отбором.</div>
-  <div class="pair">
-    <button id="export">Сохранить настройки</button>
-    <button id="import">Загрузить настройки</button>
-  </div>
-  <input type="file" id="importfile" accept=".json,application/json" hidden>
+  <div class="hint" id="tunehint"></div>
+  <div id="sections"></div>
+  <button id="reset"></button>
 </div>
 
 <div id="folders" hidden>
-  <div class="hint">Отметьте папки, которые показывать. Отмеченная включает и всё
-    вложенное. Не отмечено ничего — показывается вся директория целиком.</div>
+  <div class="section" id="foldershead"></div>
   <div class="hint" id="folderage"></div>
   <div class="banner" id="indexbanner" hidden></div>
   <div class="treebar">
@@ -173,30 +164,25 @@
     <button class="small" id="collapseall">⊟ Свернуть всё</button>
   </div>
   <div class="row"><div id="tree" class="tree"></div></div>
-  <button id="applyfolders">Применить</button>
+  <button id="applyfolders"></button>
   <div class="applybar" id="applybar" hidden>
-    <button id="applyfloat">Применить отбор</button>
+    <button id="applyfloat"></button>
   </div>
-  <button id="clearfolders">Показывать всё</button>
-  <div class="hint" style="margin-top:14px">
-    Раскрытые ветки запоминаются сами. Эта кнопка обходит <b>всё дерево</b>
-    целиком — нужна редко и работает долго. Снимки она не перечитывает: за них
-    отвечает «Перечитать снимки» на вкладке «Состояние».
-  </div>
-  <button id="rescanfolders">Обновить дерево папок</button>
+  <button id="clearfolders"></button>
+  <div class="bblock" id="rescanblock"></div>
 </div>
 
 <div id="state" hidden>
-  <div class="row">
-    <div class="name">Сейчас</div>
+  <div class="row" data-block="now">
+    <div class="bhead"></div>
     <div class="statusline" id="statusline">…</div>
   </div>
-  <div class="row">
-    <div class="name">Библиотека</div>
+  <div class="row" data-block="library">
+    <div class="bhead"></div>
     <div id="index"></div>
   </div>
-  <div class="row">
-    <div class="name">Кэш</div>
+  <div class="row" data-block="cache">
+    <div class="bhead"></div>
     <div id="cache"></div>
     <div class="bar"><i id="cachebar"></i></div>
     <div id="streamwrap" hidden>
@@ -204,8 +190,8 @@
       <div class="bar"><i id="streambar"></i></div>
     </div>
   </div>
-  <div class="row">
-    <div class="name">Носитель</div>
+  <div class="row" data-block="flash">
+    <div class="bhead"></div>
     <div id="external"></div>
     <div class="bar"><i id="externalbar"></i></div>
     <div id="archivewrap" hidden>
@@ -213,36 +199,28 @@
       <div class="bar"><i id="archivebar"></i></div>
     </div>
   </div>
-  <div class="row">
-    <div class="name">Показы по часам суток</div>
-    <div class="note">когда рамка вообще работает</div>
+  <div class="row" data-block="hours">
+    <div class="bhead"></div>
     <div class="hours" id="hours"></div>
     <div class="hlabels"><span>0</span><span>6</span><span>12</span><span>18</span><span>23</span></div>
   </div>
-  <div class="row">
-    <div class="name">Показано недавно</div>
-    <div class="note">последние кадры, новые сверху; ссылка ведёт на файл на Я.Диске</div>
+  <div class="row" data-block="recent">
+    <div class="bhead"></div>
     <div class="list" id="recent"></div>
   </div>
-  <div class="row">
-    <div class="name">Очередь</div>
-    <div class="note">что покажется дальше</div>
+  <div class="row" data-block="queue">
+    <div class="bhead"></div>
     <div class="list" id="queue"></div>
   </div>
-  <div class="row">
-    <div class="name">Не удалось загрузить</div>
-    <div class="note">файлы, которые Я.Диск не отдал или сеть не донесла; рамка попробует их снова позже</div>
+  <div class="row" data-block="failures">
+    <div class="bhead"></div>
     <div class="list" id="failures"></div>
   </div>
-  <div class="row">
-    <div class="name">Журнал</div>
+  <div class="row" data-block="log">
+    <div class="bhead"></div>
     <div class="list" id="log"></div>
   </div>
-  <div class="hint" style="margin-top:14px">
-    Перечитывает <b>снимки</b> внутри уже выбранных папок: находит добавленные,
-    убирает удалённые. Дерево папок при этом не меняется.
-  </div>
-  <button id="refresh">Перечитать снимки</button>
+  <div class="bblock" id="refreshblock"></div>
   <div class="hint" style="margin-top:22px;text-align:center">
     Исходники, релизы и что нового —
     <a class="link" href="https://github.com/nikallass/ya-photo-frame" target="_blank"
@@ -295,133 +273,111 @@ const logScale = {
   fromSlider: s => Math.round(5 * Math.pow(720, s / 1000)),
 };
 
-const FIELDS = [
-  { key: 'pauseAutoResumeMillis', name: 'Пауза не дольше', note: 'потом показ продолжится сам; 0 — пока не снимут',
-    min: 0, max: 120, step: 1, get: v => Math.round(v / 60000), set: s => s * 60000,
+// Как крутить каждый ползунок: границы, шаг, пересчёт в единицы настройки и
+// обратно, как показать значение. Названия и подсказки — в settings-ui.json,
+// общем с приложением на телевизоре; страница подшивает их по ключу.
+const SLIDERS = {
+  pauseAutoResumeMillis: { min: 0, max: 120, step: 1, get: v => Math.round(v / 60000), set: s => s * 60000,
     show: v => v ? Math.round(v / 60000) + ' мин' : 'пока не снимут' },
 
-  { key: 'videoMaxSizeBytes', name: 'Ролик не тяжелее', note: 'что тяжелее — не показывается вовсе; 0 — без ограничения',
-    min: 0, max: 8192, step: 64, get: v => Math.round(v / 1048576), set: s => s * 1048576,
+  videoMaxSizeBytes: { min: 0, max: 8192, step: 64, get: v => Math.round(v / 1048576), set: s => s * 1048576,
     show: v => !v ? 'без ограничения' : v >= 1073741824 ? (v / 1073741824).toFixed(1) + ' ГБ' : Math.round(v / 1048576) + ' МБ' },
 
-  { key: 'streamBufferBytes', name: 'Буфер для видео', note: 'место на телевизоре, куда заранее скачивается начало ролика из сети, чтобы он не заикался; ролик, который помещается сюда целиком, идёт без заиканий; фотографий не касается; 0 — показывать из сети без подготовки',
-    min: 0, max: 4096, step: 64, get: v => Math.round(v / 1048576), set: s => s * 1048576,
+  streamBufferBytes: { min: 0, max: 4096, step: 64, get: v => Math.round(v / 1048576), set: s => s * 1048576,
     show: v => !v ? 'нет' : v >= 1073741824 ? (v / 1073741824).toFixed(1) + ' ГБ' : Math.round(v / 1048576) + ' МБ' },
 
-  { key: 'streamMaxBitrateBps', name: 'Канал', note: 'сколько тянет сеть до Я.Диска; ролик с битрейтом выше идёт не потоком, а с носителя, а без носителя пропускается; 0 — всё потоком',
-    min: 0, max: 200, step: 5, get: v => Math.round(v / 1000000), set: s => s * 1000000,
-    show: v => !v ? 'всё потоком' : Math.round(v / 1000000) + ' Мбит/с' },
+  streamMaxBitrateBps: { min: 0, max: 200, step: 5, get: v => Math.round(v / 1000000), set: s => s * 1000000,
+    show: v => !v ? 'всё стримится' : Math.round(v / 1000000) + ' Мбит/с' },
 
-  { key: 'externalReserveBytes', name: 'Запас на носителе', note: 'сколько места на флешке не занимать; остальное — под ролики, давно не показанные вытесняются',
-    min: 0, max: 64, step: 1, get: v => Math.round(v / 536870912), set: s => s * 536870912,
+  externalReserveBytes: { min: 0, max: 64, step: 1, get: v => Math.round(v / 536870912), set: s => s * 536870912,
     show: v => (v / 1073741824).toFixed(1) + ' ГБ' },
 
-  { key: 'videoMaxDurationMillis', name: 'Ролик не дольше', note: '0 — до конца, сколько бы ни длился',
-    min: 0, max: 1800, step: 10,
+  videoMaxDurationMillis: { min: 0, max: 1800, step: 10,
     get: v => Math.round(v / 1000), set: s => s * 1000,
     show: v => v === 0 ? 'без ограничения'
       : (v < 60000 ? Math.round(v/1000) + ' с' : (v/60000).toFixed(v % 60000 ? 1 : 0) + ' мин') },
 
-  { key: 'showDurationMillis', name: 'Интервал показа', note: 'от 5 секунд до часа',
-    min: 0, max: 1000, step: 1,
+  showDurationMillis: { min: 0, max: 1000, step: 1,
     get: v => logScale.toSlider(v / 1000), set: s => logScale.fromSlider(s) * 1000,
     show: v => { const s = v / 1000;
       return s < 60 ? s + ' с' : (s % 60 === 0 ? (s / 60) + ' мин' : (s / 60).toFixed(1) + ' мин'); } },
 
-  { key: 'crossfadeMillis', name: 'Переход', note: 'сколько длится смена кадра',
-    min: 0, max: 5000, step: 100, get: v => v, set: s => s,
+  crossfadeMillis: { min: 0, max: 5000, step: 100, get: v => v, set: s => s,
     show: v => (v / 1000).toFixed(1) + ' с' },
 
-  { key: 'driftAmplitude', name: 'Длина хода', note: 'насколько далеко уезжает кадр всего',
-    min: 0, max: 300, step: 1, get: v => Math.round(v * 1000), set: s => s / 1000,
-    show: v => (v * 100).toFixed(1) + ' % ширины' },
+  driftAmplitude: { min: 0, max: 300, step: 1, get: v => Math.round(v * 1000), set: s => s / 1000,
+    show: v => v ? (v * 100).toFixed(1) + ' % ширины' : 'неподвижен' },
 
-  { key: 'zoomAmount', name: 'Приближение', note: 'на сколько кадр вырастает за показ; 0 — без приближения',
-    min: 0, max: 30, step: 1, get: v => Math.round(v * 100), set: s => s / 100,
+  zoomAmount: { min: 0, max: 30, step: 1, get: v => Math.round(v * 100), set: s => s / 100,
     show: v => v ? Math.round(v * 100) + ' %' : 'нет' },
 
-  { key: 'frameInset', name: 'Размер кадра', note: 'доля экрана, в которую вписан снимок',
-    min: 30, max: 100, step: 1, get: v => Math.round(v * 100), set: s => s / 100,
+  frameInset: { min: 30, max: 100, step: 1, get: v => Math.round(v * 100), set: s => s / 100,
     show: v => Math.round(v * 100) + ' %' },
 
-  { key: 'placementStrength', name: 'Смещение от центра', note: '0 — по центру, 1 — точка золотого сечения',
-    min: 0, max: 100, step: 5, get: v => Math.round(v * 100), set: s => s / 100,
+  placementStrength: { min: 0, max: 100, step: 5, get: v => Math.round(v * 100), set: s => s / 100,
     show: v => Math.round(v * 100) + ' %' },
 
-  { key: 'edgeMargin', name: 'Отступ от края', note: 'ограничивает смещение и длину хода',
-    min: 0, max: 25, step: 1, get: v => Math.round(v * 100), set: s => s / 100,
+  edgeMargin: { min: 0, max: 25, step: 1, get: v => Math.round(v * 100), set: s => s / 100,
     show: v => Math.round(v * 100) + ' %' },
 
-  { key: 'backgroundDim', name: 'Затемнение фона', note: '0 — как есть, 100 — чёрный',
-    min: 0, max: 100, step: 5, get: v => Math.round(v * 100), set: s => s / 100,
+  backgroundDim: { min: 0, max: 100, step: 5, get: v => Math.round(v * 100), set: s => s / 100,
     show: v => Math.round(v * 100) + ' %' },
 
-  { key: 'blurSampleLongSide', name: 'Размытие фона', note: 'меньше пикселей — сильнее размыто',
-    min: 2, max: 64, step: 1, get: v => v, set: s => s, show: v => v + ' пикс.' },
+  // В настройке хранятся пиксели фона (2…64, меньше — размытее), а ползунок
+  // показывает силу размытия: вправо — размытее, как подсказывает название.
+  blurSampleLongSide: { min: 0, max: 100, step: 1,
+    get: v => Math.round((64 - v) * 100 / 62), set: s => 64 - Math.round(s * 62 / 100),
+    show: v => Math.round((64 - v) * 100 / 62) + ' %' },
 
-  { key: 'minPhotoFraction', name: 'Минимальная ширина', note: 'снимки уже этой доли экрана не показываются',
-    min: 0, max: 60, step: 5, get: v => Math.round(v * 100), set: s => s / 100,
+  minPhotoFraction: { min: 0, max: 60, step: 5, get: v => Math.round(v * 100), set: s => s / 100,
     show: v => v ? Math.round(v * 100) + ' % экрана' : 'показывать всё' },
 
   // Ползунок нелинейный: левая половина — дни от 1 до 30, правая — от месяца
   // до года. Иначе на прямой шкале до года первый месяц занимал бы палец.
-  { key: 'freshnessWindowDays', name: 'Считать свежим', note: 'сколько после заливки или первого появления в рамке снимок выпадает чаще',
-    min: 0, max: 100, step: 1,
+  freshnessWindowDays: { min: 0, max: 100, step: 1,
     get: v => v <= 30 ? Math.round((v - 1) / 29 * 50)
                       : Math.round(50 + Math.log(Math.min(v, 365) / 30) / Math.log(365 / 30) * 50),
     set: s => s <= 50 ? Math.round(1 + s / 50 * 29)
                       : Math.round(30 * Math.pow(365 / 30, (s - 50) / 50)),
     show: v => v < 30 ? v + ' дн.' : v >= 360 ? 'год' : Math.round(v / 30) + ' мес.' },
 
-  { key: 'cacheBudgetBytes', name: 'Кеш для фото', note: 'место под уменьшенные копии снимков и лёгкие ролики; они показываются без сети',
-    min: 64, max: 8192, step: 64,
+  cacheBudgetBytes: { min: 64, max: 8192, step: 64,
     get: v => Math.round(v / 1048576), set: s => s * 1048576,
     show: v => v >= 1073741824 ? (v / 1073741824).toFixed(1) + ' ГБ' : Math.round(v / 1048576) + ' МБ' },
 
-  { key: 'cacheItemThresholdBytes', name: 'Порог кэширования', note: 'что легче — ложится в кэш целиком; что тяжелее — идёт потоком с подкачкой заранее',
-    min: 1, max: 2048, step: 1,
+  cacheItemThresholdBytes: { min: 1, max: 2048, step: 1,
     get: v => Math.round(v / 1048576), set: s => s * 1048576,
     show: v => Math.round(v / 1048576) + ' МБ' },
 
-  { key: 'prefetchCount', name: 'Предзагрузка', note: 'на сколько кадров вперёд готовиться',
-    min: 1, max: 50, step: 1, get: v => v, set: s => s, show: v => v + ' кадр(ов)' },
+  prefetchCount: { min: 1, max: 50, step: 1, get: v => v, set: s => s, show: v => v + ' кадр(ов)' },
 
-  { key: 'indexRefreshIntervalMillis', name: 'Переобход папки', note: 'не чаще чем раз в; не реже трёх часов — столько живут ссылки Я.Диска',
-    min: 1, max: 180, step: 1,
+  indexRefreshIntervalMillis: { min: 1, max: 180, step: 1,
     get: v => Math.round(v / 60000), set: s => s * 60000,
     show: v => { const m = Math.round(v / 60000);
       return m < 60 ? m + ' мин' : (m / 60).toFixed(m % 60 ? 1 : 0) + ' ч'; } },
-];
-
-const TOGGLES = [
-  { key: 'showVideo', name: 'Видео', note: 'показывать ролики наравне со снимками' },
-  { key: 'videoSoundEnabled', name: 'Звук в роликах', note: 'по умолчанию выключен' },
-  { key: 'pairPortraits', name: 'Пары вертикальных', note: 'два снимка рядом заполняют экран' },
-  { key: 'showClock', name: 'Часы', note: 'поверх кадра' },
-  { key: 'showDate', name: 'Дата съёмки', note: 'поверх кадра' },
-];
+};
 
 const state = {}, inputs = {};
-const rows = document.getElementById('rows'), status = document.getElementById('status');
+const status = document.getElementById('status');
+let UI = null;          // settings-ui.json
+const FIELDS = [];      // ползунки, которые попали на страницу: {key, ...SLIDERS[key]}
+const TOGGLES = [];     // переключатели: {key}
 
-for (const f of FIELDS) {
-  const row = document.createElement('div');
-  row.className = 'row';
-  row.innerHTML = '<div class="head"><span class="name">' + f.name + '</span>' +
-    '<span class="right"><span class="value" id="v-' + f.key + '">—</span>' +
-    undoButton(f.key) + '</span></div>' +
-    '<div class="note">' + f.note + '</div>';
-  const input = document.createElement('input');
-  input.type = 'range'; input.min = f.min; input.max = f.max; input.step = f.step;
-  input.addEventListener('input', () => {
-    state[f.key] = f.set(Number(input.value)); paint(f); schedule();
-  });
-  row.appendChild(input); rows.appendChild(row); inputs[f.key] = input;
-  row.querySelector('.undo').addEventListener('click', e => {
+const escapeHtml = s => String(s).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+const escapeAttr = s => escapeHtml(s).replace(/"/g, '&quot;');
+
+// Значок справки и сам текст. Текст лежит рядом свёрнутым; тап по значку
+// раскрывает его, наведение на компьютере показывает то же в подсказке.
+const info = text => text ? '<span class="info" title="' + escapeAttr(text) + '">i</span>' : '';
+const helpBox = text => text ? '<div class="help" hidden>' + escapeHtml(text) + '</div>' : '';
+function wireInfo(root) {
+  root.querySelectorAll('.info').forEach(i => i.addEventListener('click', e => {
     e.stopPropagation();
-    if (!(f.key in defaults)) return;
-    state[f.key] = defaults[f.key]; input.value = f.get(state[f.key]); paint(f); schedule();
-  });
+    const box = i.closest('.row, .section, .bblock, .bhead').querySelector('.help');
+    if (!box) return;
+    box.hidden = !box.hidden;
+    i.classList.toggle('open', !box.hidden);
+  }));
 }
 
 // Кнопка «вернуть как было» у каждого параметра. Гаснет, когда значение и так
@@ -435,21 +391,135 @@ function paintUndo(key, same) {
   if (b) b.disabled = !(key in defaults) || same;
 }
 
-const togglesBox = document.getElementById('toggles');
-for (const t of TOGGLES) {
+function rowHead(item) {
+  return '<div class="head"><span class="name">' + escapeHtml(item.title) + info(item.help) + '</span>' +
+    '<span class="right"><span class="value" id="v-' + item.key + '">—</span>' +
+    undoButton(item.key) + '</span></div>' +
+    '<div class="note">' + escapeHtml(item.note) + '</div>';
+}
+
+function sliderRow(item) {
+  const f = Object.assign({ key: item.key }, SLIDERS[item.key]);
+  FIELDS.push(f);
   const row = document.createElement('div');
   row.className = 'row';
-  row.innerHTML = '<div class="head"><span class="name">' + t.name + '</span>' +
-    '<span class="right"><span class="value" id="v-' + t.key + '">—</span>' +
-    undoButton(t.key) + '</span></div>' +
-    '<div class="note">' + t.note + '</div>';
+  row.innerHTML = rowHead(item);
+  const input = document.createElement('input');
+  input.type = 'range'; input.min = f.min; input.max = f.max; input.step = f.step;
+  input.addEventListener('input', () => {
+    state[f.key] = f.set(Number(input.value)); paint(f); schedule();
+  });
+  row.appendChild(input); inputs[f.key] = input;
+  row.insertAdjacentHTML('beforeend', helpBox(item.help));
+  row.querySelector('.undo').addEventListener('click', e => {
+    e.stopPropagation();
+    if (!(f.key in defaults)) return;
+    state[f.key] = defaults[f.key]; input.value = f.get(state[f.key]); paint(f); schedule();
+  });
+  return row;
+}
+
+function toggleRow(item) {
+  const t = { key: item.key };
+  TOGGLES.push(t);
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML = rowHead(item) + helpBox(item.help);
   row.addEventListener('click', () => { state[t.key] = !state[t.key]; paintToggle(t); schedule(); });
   row.querySelector('.undo').addEventListener('click', e => {
     e.stopPropagation();
     if (!(t.key in defaults)) return;
     state[t.key] = defaults[t.key]; paintToggle(t); schedule();
   });
-  togglesBox.appendChild(row);
+  return row;
+}
+
+function folderRow(item) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML = '<div class="head"><span class="name">' + escapeHtml(item.title) + info(item.help) + '</span></div>' +
+    '<div class="note">' + escapeHtml(item.note) + '</div>' +
+    '<input type="text" id="folder" autocapitalize="off" autocorrect="off" spellcheck="false">' +
+    '<button id="savefolder">Задать папку</button>' + helpBox(item.help);
+  return row;
+}
+
+function volumeRow(item) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML = '<div class="head"><span class="name">' + escapeHtml(item.title) + info(item.help) + '</span></div>' +
+    '<div class="note">' + escapeHtml(item.note) + '</div>' +
+    '<div class="list" id="volumes"><div class="empty">…</div></div>' + helpBox(item.help);
+  return row;
+}
+
+function sectionHead(section) {
+  const el = document.createElement('div');
+  el.className = 'section';
+  el.innerHTML = '<div class="stitle">' + escapeHtml(section.title) + info(section.help) + '</div>' +
+    (section.note ? '<div class="snote">' + escapeHtml(section.note) + '</div>' : '') + helpBox(section.help);
+  return el;
+}
+
+// Кнопка с одной строкой под ней и справкой — для действий, которые путают.
+function buttonBlock(box, id) {
+  const b = UI.buttons[id] || { title: id };
+  box.innerHTML = '<button id="' + id + '">' + escapeHtml(b.title) + '</button>' +
+    (b.note ? '<div class="note bnote">' + escapeHtml(b.note) + info(b.help) + '</div>' : '') + helpBox(b.help);
+  wireInfo(box);
+}
+
+function buildTune() {
+  document.getElementById('tunehint').textContent = (UI.tabs.tune || {}).note || '';
+  const box = document.getElementById('sections');
+  for (const section of UI.sections) {
+    if (section.title) box.appendChild(sectionHead(section));
+    for (const item of section.items) {
+      if (item.kind === 'slider' && !SLIDERS[item.key]) {
+        console.error('нет ползунка для ' + item.key); continue;
+      }
+      const row = item.kind === 'slider' ? sliderRow(item)
+        : item.kind === 'toggle' ? toggleRow(item)
+        : item.kind === 'folder' ? folderRow(item)
+        : item.kind === 'volume' ? volumeRow(item) : null;
+      if (row) box.appendChild(row);
+    }
+    if (section.id === 'transfer') {
+      const pair = document.createElement('div');
+      pair.className = 'pair';
+      pair.innerHTML = '<button id="export">' + escapeHtml(UI.buttons.export.title) + '</button>' +
+        '<button id="import">' + escapeHtml(UI.buttons.import.title) + '</button>' +
+        '<input type="file" id="importfile" accept=".json,application/json" hidden>';
+      box.appendChild(pair);
+    }
+  }
+  document.getElementById('reset').textContent = UI.buttons.reset.title;
+  wireInfo(box);
+  for (const key in SLIDERS) if (!FIELDS.some(f => f.key === key)) console.error('в settings-ui.json нет ' + key);
+}
+
+function buildFolders() {
+  const f = UI.tabs.folders;
+  const head = document.getElementById('foldershead');
+  head.innerHTML = '<div class="stitle">' + escapeHtml(f.title) + info(f.help) + '</div>' +
+    '<div class="snote">' + escapeHtml(f.note) + '</div>' + helpBox(f.help);
+  wireInfo(head);
+  document.getElementById('applyfolders').textContent = UI.buttons.applyfolders.title;
+  document.getElementById('applyfloat').textContent = UI.buttons.applyfolders.title;
+  document.getElementById('clearfolders').textContent = UI.buttons.clearfolders.title;
+  buttonBlock(document.getElementById('rescanblock'), 'rescanfolders');
+}
+
+function buildState() {
+  for (const b of UI.blocks) {
+    const row = document.querySelector('[data-block="' + b.id + '"]');
+    if (!row) continue;
+    const head = row.querySelector('.bhead');
+    head.innerHTML = '<div class="head"><span class="name">' + escapeHtml(b.title) + info(b.help) + '</span></div>' +
+      (b.note ? '<div class="note">' + escapeHtml(b.note) + '</div>' : '') + helpBox(b.help);
+    wireInfo(head);
+  }
+  buttonBlock(document.getElementById('refreshblock'), 'refresh');
 }
 
 function paintToggle(t) {
@@ -471,26 +541,26 @@ async function loadDefaults() {
     for (const t of TOGGLES) paintToggle(t);
   } catch (e) { /* без них кнопки просто остаются погашенными */ }
 }
-loadDefaults();
 
 function render(data) {
   Object.assign(state, data);
   if (data.version) document.getElementById('version').textContent = 'Фоторамка ' + data.version;
   const folder = document.getElementById('folder');
-  if (document.activeElement !== folder) folder.value = state.folderUrl || '';
+  if (folder && document.activeElement !== folder) folder.value = state.folderUrl || '';
   for (const f of FIELDS) { inputs[f.key].value = f.get(state[f.key]); paint(f); }
   for (const t of TOGGLES) paintToggle(t);
   paintVolumes();
 }
 
-// Тома под носитель: внутренняя память и все подключённые флешки. Выбранный
-// помнится по UUID, поэтому вынутая флешка остаётся выбранной — и помечается.
+// Тома под флешку: все подключённые. Выбранная помнится по UUID, поэтому
+// вынутая флешка остаётся выбранной — и помечается.
 let volumes = [];
 const gb = n => (n / 1073741824).toFixed(1) + ' ГБ';
 function paintVolumes() {
   const box = document.getElementById('volumes');
+  if (!box) return;
   const chosen = state.externalStorageUuid || '';
-  const rows = [{ uuid: '', label: 'Без носителя', note: 'тяжёлые ролики пропускаются' }]
+  const rows = [{ uuid: '', label: 'Без флешки', note: 'тяжёлые ролики пропускаются' }]
     .concat(volumes.map(v => ({ uuid: v.uuid, label: v.label + ' (' + v.uuid + ')', bad: !v.usable,
       note: v.problem ? v.problem : gb(v.totalBytes) + ', свободно ' + gb(v.freeBytes) })));
   if (chosen && !volumes.some(v => v.uuid === chosen)) {
@@ -512,8 +582,6 @@ async function loadVolumes() {
   } catch (e) { volumes = []; }
   paintVolumes();
 }
-loadVolumes();
-setInterval(loadVolumes, 10000);
 
 let timer = null;
 function schedule() {
@@ -536,12 +604,15 @@ async function send() {
   } catch (e) { status.textContent = 'не достучался до телевизора'; }
 }
 
+// Кнопки вкладки «Настройка» появляются вместе с разделами, поэтому и
+// обработчики вешаются после сборки.
+function wireTune() {
 document.getElementById('savefolder').addEventListener('click', async () => {
   const url = document.getElementById('folder').value.trim();
   if (!url) return;
   // Первое задание папки ничего не стирает — подтверждать нечего.
   const initial = !state.folderUrl;
-  if (!initial && !confirm('Индекс и кэш прежней папки будут удалены. Меняем?')) return;
+  if (!initial && !confirm('Библиотека, кэш и файлы на флешке от прежней папки будут удалены. Меняем?')) return;
   status.textContent = 'задаю папку…';
   const res = await fetch('/api/settings', { method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -606,6 +677,7 @@ document.getElementById('refresh').addEventListener('click', async () => {
   await fetch('/api/refresh', { method: 'POST' });
   setTimeout(loadState, 1500);
 });
+}
 
 // ── вкладка папок ──────────────────────────────────────────────────────────
 
@@ -636,10 +708,8 @@ async function childrenOf(path) {
 function showFolderAge() {
   const box = document.getElementById('folderage');
   box.textContent = foldersBuiltAt
-    ? 'Запомнено папок: ' + foldersKnown + '. Раз раскрытый уровень открывается ' +
-      'мгновенно и без обращения к Я.Диску; новые папки в нём появятся после обновления.'
-    : 'Дерево раскрывается по одному уровню и запоминается: второй раз этот же ' +
-      'уровень откроется мгновенно.';
+    ? 'Запомнено папок: ' + foldersKnown + '; новые появятся после обновления дерева.'
+    : 'Дерево раскрывается по одному уровню, раз открытый уровень запоминается.';
 }
 
 function nodeView(name, path, depth) {
@@ -747,13 +817,16 @@ document.getElementById('expandall').addEventListener('click', async () => {
   }
 });
 
-document.getElementById('rescanfolders').addEventListener('click', async () => {
-  if (!confirm('Дерево обойдётся целиком и запомнится. На большом Я.Диске это ' +
-               'сотни обращений и добрый десяток минут — обычно достаточно просто ' +
-               'раскрывать нужные ветки, они запоминаются сами. Всё равно начинаем?')) return;
-  await fetch('/api/rescan-folders', { method: 'POST' });
-  status.textContent = 'обновляю дерево папок в фоне — загляните сюда через пару минут';
-});
+// Кнопка обновления дерева появляется вместе с текстами — обработчик после сборки.
+function wireFolders() {
+  document.getElementById('rescanfolders').addEventListener('click', async () => {
+    if (!confirm('Дерево обойдётся целиком и запомнится. На большом Я.Диске это ' +
+                 'сотни обращений и добрый десяток минут — обычно достаточно просто ' +
+                 'раскрывать нужные ветки. Всё равно начинаем?')) return;
+    await fetch('/api/rescan-folders', { method: 'POST' });
+    status.textContent = 'обновляю дерево папок в фоне — загляните сюда через пару минут';
+  });
+}
 
 document.getElementById('collapseall').addEventListener('click', () => {
   expanded = new Set(['/']);
@@ -877,7 +950,6 @@ const kvPath = (k, v) => '<div class="kv path"><span>' + k + '</span><span>' + e
 const list = (items, bad) => items.length
   ? items.map(x => '<div' + (bad ? ' class="bad"' : '') + '>' + escapeHtml(x) + '</div>').join('')
   : '<div class="empty">пусто</div>';
-const escapeHtml = s => s.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
 // Файл внутри общедоступной папки открывается по адресу папки плюс путь.
 const diskLink = path => (state.folderUrl || '').replace(/\/+$/, '') +
   path.split('/').map(encodeURIComponent).join('/');
@@ -918,10 +990,10 @@ async function loadState() {
     const x = d.external || {};
     const ar = x.archiving;
     document.getElementById('external').innerHTML = !x.uuid
-      ? kv('носитель', 'не выбран') + kv('ждут носителя', x.waiting || 0)
-      : kv('носитель', (x.label || x.uuid) + (x.present ? '' : ' — ' + (x.problem || 'не подключён'))) +
+      ? kv('флешка', 'не выбрана') + kv('ждут флешку', x.waiting || 0)
+      : kv('флешка', (x.label || x.uuid) + (x.present ? '' : ' — ' + (x.problem || 'не подключена'))) +
         (x.present ? kvPath('папка', x.path) + kv('занято', bytes(x.usedBytes)) + kv('свободно', bytes(x.freeBytes)) +
-          kv('файлов', x.files) : '') + kv('ждут носителя', x.waiting || 0);
+          kv('файлов', x.files) : '') + kv('ждут флешку', x.waiting || 0);
     document.getElementById('externalbar').style.width =
       (x.present && x.totalBytes ? (x.totalBytes - x.freeBytes) / x.totalBytes * 100 : 0) + '%';
     const aw = document.getElementById('archivewrap');
@@ -930,7 +1002,7 @@ async function loadState() {
       const fill = ar.wantedBytes ? ar.doneBytes / ar.wantedBytes : 0;
       document.getElementById('archivebar').style.width = Math.min(100, fill * 100) + '%';
       document.getElementById('archivenote').textContent =
-        'качаю на носитель: ' + ar.name + ' — ' + Math.round(fill * 100) + ' % из ' + bytes(ar.wantedBytes);
+        'качаю на флешку: ' + ar.name + ' — ' + Math.round(fill * 100) + ' % из ' + bytes(ar.wantedBytes);
     }
 
     const peak = Math.max(1, ...d.hourly);
@@ -1008,6 +1080,13 @@ document.addEventListener('visibilitychange', () => {
 setInterval(() => { if (!dragging && timer === null && view === 'tune') loadSettings(); }, 15000);
 
 (async () => {
+  try {
+    UI = await (await fetch('/settings-ui.json')).json();
+  } catch (e) { status.textContent = 'не достучался до телевизора'; return; }
+  buildTune(); buildFolders(); buildState(); wireTune(); wireFolders();
+  await loadDefaults();
+  loadVolumes();
+  setInterval(loadVolumes, 10000);
   if (await loadSettings()) status.textContent = 'готов';
 })();
 </script>

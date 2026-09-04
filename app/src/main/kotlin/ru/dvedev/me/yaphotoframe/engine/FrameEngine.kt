@@ -559,12 +559,12 @@ class FrameEngine(
             deliver(item)
         }
         PlannedDelivery.Archive -> {
-            val store = checkNotNull(external()) { "носитель отключён" }
+            val store = checkNotNull(external()) { "флешка отключена" }
             // Лежащий на носителе не требует даже ссылки: за ней ходят к API.
             if (store.has(item.path)) Delivery.Local(store.file(item.path))
             else Delivery.Local(store.fetch(item, source.downloadUrl(item)) {})
         }
-        PlannedDelivery.Skip -> error("ролик ${item.name} тяжелее канала, а носителя нет")
+        PlannedDelivery.Skip -> error("ролик ${item.name} тяжелее сети, а флешки нет")
     }
 
     /** Ролик стоит в очереди, но на экран пока не идёт: ждёт замера, подкачки или носителя. */
