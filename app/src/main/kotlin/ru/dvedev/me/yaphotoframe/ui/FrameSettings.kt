@@ -168,6 +168,16 @@ data class FrameSettings(
     val externalReserveBytes: Long = 1024L * 1024 * 1024,
 
     /**
+     * Качать ли, пока на экране ролик.
+     *
+     * По умолчанию да: подкачка ждёт только при потоковом ролике, который
+     * делит с ней сеть, остальное идёт как обычно. Выключают на слабом
+     * телевизоре или медленном интернете: тогда на время любого ролика
+     * стоят и подкачка, и закачка на флешку, и лёгкие ролики в кэш.
+     */
+    val downloadsDuringVideo: Boolean = true,
+
+    /**
      * Со звуком ли.
      *
      * По умолчанию нет: заставка, внезапно заговорившая в тишине, пугает.
@@ -237,6 +247,7 @@ data class FrameSettings(
         "showVideo" to showVideo,
         "videoMaxDurationMillis" to videoMaxDurationMillis,
         "videoSoundEnabled" to videoSoundEnabled,
+        "downloadsDuringVideo" to downloadsDuringVideo,
         "videoMaxSizeBytes" to videoMaxSizeBytes,
         "streamBufferBytes" to streamBufferBytes,
         "streamMaxBitrateBps" to streamMaxBitrateBps,

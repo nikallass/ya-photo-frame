@@ -169,16 +169,22 @@ class FrameEngine(
     @Volatile
     private var downloadsHeld = false
 
+    /** Одна подкачка стоит — потоковый ролик на экране делит с ней сеть. */
+    @Volatile
+    private var primingHeld = false
+
     /**
-     * Придержать или отпустить закачки. При удержании идущая подкачка
-     * отменяется — буфер потока помнит скачанное, и после ролика она
-     * продолжится с того же места. Закачка на флешку доигрывает: её файл
-     * пишется на флешку, а не в память телевизора, а отмена потеряла бы
-     * скачанное.
+     * Придержать или отпустить закачки: [all] — все тяжёлые (по настройке
+     * «Закачки во время ролика»), [priming] — только подкачку потока. При
+     * удержании подкачки идущая отменяется — буфер потока помнит скачанное,
+     * и после ролика она продолжится с того же места. Закачка на флешку
+     * доигрывает: её файл пишется на флешку, а не в память телевизора, а
+     * отмена потеряла бы скачанное.
      */
-    fun holdDownloads(held: Boolean) {
-        downloadsHeld = held
-        if (!held) return
+    fun holdDownloads(all: Boolean, priming: Boolean = all) {
+        downloadsHeld = all
+        primingHeld = priming || all
+        if (!primingHeld) return
         synchronized(primeLock) {
             primeJob?.cancel()
             primeJob = null
@@ -669,7 +675,7 @@ class FrameEngine(
     }
 
     private fun startPriming(item: MediaItem) {
-        if (downloadsHeld) return
+        if (primingHeld) return
         synchronized(primeLock) {
             // Подкачанный ждёт показа — буфер занят им, следующий подождёт.
             if (primedWaiting != null && primedWaiting != item.path) return

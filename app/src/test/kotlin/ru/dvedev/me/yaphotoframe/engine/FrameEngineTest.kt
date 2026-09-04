@@ -940,13 +940,18 @@ class FrameEngineTest {
         )
         engine.sync()
 
-        engine.holdDownloads(true)
+        engine.holdDownloads(all = true)
         engine.prefetch()
         engine.awaitArchiving()
         assertTrue("ролик на экране — на флешку ничего не качается", !store.has("/огромное.mov"))
         assertTrue("но ждёт в очереди", engine.upcoming().any { it.name == "огромное.mov" })
 
-        engine.holdDownloads(false)
+        engine.holdDownloads(all = false, priming = true)
+        engine.prefetch()
+        engine.awaitArchiving()
+        assertTrue("удержана только подкачка — флешка качается", store.has("/огромное.mov"))
+
+        engine.holdDownloads(all = false)
         engine.prefetch()
         engine.awaitArchiving()
         assertTrue("после ролика закачка пошла", store.has("/огромное.mov"))

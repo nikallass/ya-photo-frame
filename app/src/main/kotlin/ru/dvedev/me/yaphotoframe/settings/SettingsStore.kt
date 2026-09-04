@@ -80,6 +80,7 @@ class SettingsStore(context: Context) {
             selectedFolders = prefs.getStringSet(KEY_FOLDERS, defaults.selectedFolders)
                 ?: defaults.selectedFolders,
             showVideo = prefs.getBoolean(KEY_VIDEO, defaults.showVideo),
+            downloadsDuringVideo = prefs.getBoolean(KEY_DOWNLOADS_DURING_VIDEO, defaults.downloadsDuringVideo),
             videoMaxDurationMillis =
                 prefs.getLong(KEY_VIDEO_MAX, defaults.videoMaxDurationMillis),
             videoSoundEnabled = prefs.getBoolean(KEY_VIDEO_SOUND, defaults.videoSoundEnabled),
@@ -128,6 +129,7 @@ class SettingsStore(context: Context) {
             .putLong(KEY_CACHE_THRESHOLD, value.cacheItemThresholdBytes)
             .putStringSet(KEY_FOLDERS, value.selectedFolders)
             .putBoolean(KEY_VIDEO, value.showVideo)
+            .putBoolean(KEY_DOWNLOADS_DURING_VIDEO, value.downloadsDuringVideo)
             .putLong(KEY_VIDEO_MAX, value.videoMaxDurationMillis)
             .putBoolean(KEY_VIDEO_SOUND, value.videoSoundEnabled)
             .putLong(KEY_VIDEO_MAX_SIZE, value.videoMaxSizeBytes)
@@ -164,6 +166,7 @@ class SettingsStore(context: Context) {
         const val KEY_REFRESH = "index_refresh_interval_millis"
         const val KEY_FOLDERS = "selected_folders"
         const val KEY_VIDEO = "show_video"
+        const val KEY_DOWNLOADS_DURING_VIDEO = "downloads_during_video"
         const val KEY_VIDEO_MAX = "video_max_duration_millis"
         const val KEY_VIDEO_SOUND = "video_sound_enabled"
         const val KEY_VIDEO_MAX_SIZE = "video_max_size_bytes"
@@ -219,6 +222,7 @@ fun FrameSettings.sanitized(): FrameSettings {
         // со всем подряд, и «выбрано ничего» превратилось бы в «выбрано всё».
         selectedFolders = selectedFolders.filter { it.isNotBlank() }.toSet(),
         showVideo = showVideo,
+        downloadsDuringVideo = downloadsDuringVideo,
         videoMaxDurationMillis = videoMaxDurationMillis.coerceIn(0L, 60L * 60 * 1000),
         videoSoundEnabled = videoSoundEnabled,
         videoMaxSizeBytes = videoMaxSizeBytes.coerceIn(0L, 8L * 1024 * 1024 * 1024),

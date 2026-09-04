@@ -870,9 +870,16 @@ class FrameDreamService : DreamService() {
 
         showingVideo = prepared is PreparedVideo
         if (!showingVideo) overlay(showingSound = false)
-        // Пока ролик на экране, тяжёлые закачки стоят: подготовка после
-        // смены кадра их возобновит.
-        engine?.holdDownloads(prepared is PreparedVideo)
+        // Пока ролик на экране: подкачка потока ждёт, если ролик сам идёт
+        // потоком (они делят сеть); всё остальное — по настройке «Закачки во
+        // время ролика». Подготовка после смены кадра возобновит.
+        val video = prepared as? PreparedVideo
+        val holdAll = video != null && !store.current.downloadsDuringVideo
+        engine?.holdDownloads(
+            all = holdAll,
+            priming = holdAll ||
+                video?.delivery is ru.dvedev.me.yaphotoframe.cache.Delivery.Streamed,
+        )
         // Плеер здесь не останавливаем: пока слой с роликом виден, он держит на
         // поверхности последний кадр. Отпустим его, когда слой уйдёт.
         if (prepared is PreparedVideo) startPlayback(prepared)

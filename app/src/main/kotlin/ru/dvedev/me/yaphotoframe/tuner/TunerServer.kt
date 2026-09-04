@@ -319,6 +319,8 @@ class TunerServer(
                 indexRefreshIntervalMillis = values["indexRefreshIntervalMillis"]?.toLongOrNull()
                     ?: current.indexRefreshIntervalMillis,
                 showVideo = values["showVideo"]?.toBooleanStrictOrNull() ?: current.showVideo,
+                downloadsDuringVideo = values["downloadsDuringVideo"]?.toBooleanStrictOrNull()
+                    ?: current.downloadsDuringVideo,
                 videoMaxDurationMillis = values["videoMaxDurationMillis"]?.toLongOrNull()
                     ?: current.videoMaxDurationMillis,
                 videoSoundEnabled = values["videoSoundEnabled"]?.toBooleanStrictOrNull()

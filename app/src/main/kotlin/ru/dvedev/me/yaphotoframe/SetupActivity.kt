@@ -319,6 +319,7 @@ class SetupActivity : Activity() {
         },
         "showVideo" to toggle({ it.showVideo }) { it.copy(showVideo = !it.showVideo) },
         "videoSoundEnabled" to toggle({ it.videoSoundEnabled }) { it.copy(videoSoundEnabled = !it.videoSoundEnabled) },
+        "downloadsDuringVideo" to toggle({ it.downloadsDuringVideo }) { it.copy(downloadsDuringVideo = !it.downloadsDuringVideo) },
         "pairPortraits" to toggle({ it.pairPortraits }) { it.copy(pairPortraits = !it.pairPortraits) },
         "minPhotoFraction" to Editor(
             { if (it.minPhotoFraction <= 0f) "показывать всё" else "${(it.minPhotoFraction * 100).toInt()} % экрана" },

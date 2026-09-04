@@ -67,6 +67,8 @@ class SettingsReceiver : BroadcastReceiver() {
             "indexRefreshIntervalMillis" ->
                 raw.toLongOrNull()?.let { settings.copy(indexRefreshIntervalMillis = it) }
             "showVideo" -> raw.toBooleanStrictOrNull()?.let { settings.copy(showVideo = it) }
+            "downloadsDuringVideo" ->
+                raw.toBooleanStrictOrNull()?.let { settings.copy(downloadsDuringVideo = it) }
             "videoMaxDurationMillis" ->
                 raw.toLongOrNull()?.let { settings.copy(videoMaxDurationMillis = it) }
             "videoSoundEnabled" ->
