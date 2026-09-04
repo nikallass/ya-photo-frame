@@ -1000,12 +1000,9 @@ class FrameDreamService : DreamService() {
 
         return try {
             val folders = kotlinx.coroutines.runBlocking { engine.subfolders(path) }
-            val items = folders.joinToString(",", "[", "]") { folder ->
-                "{\"name\":\"" + escape(folder.name) + "\",\"path\":\"" + escape(folder.path) + "\"}"
-            }
-            "{\"folders\":" + items +
-                ",\"builtAt\":" + engine.foldersBuiltAtMillis +
-                ",\"known\":" + engine.foldersKnown + "}"
+            ru.dvedev.me.yaphotoframe.tuner.foldersJson(
+                folders, engine.foldersBuiltAtMillis, engine.foldersKnown, engine::knownSubfolderCount,
+            )
         } catch (e: Exception) {
             Diary.problem("не смог перечислить подпапки «$path»", e)
             "{\"folders\":[],\"builtAt\":0,\"known\":0}"

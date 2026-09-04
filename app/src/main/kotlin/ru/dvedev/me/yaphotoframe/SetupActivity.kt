@@ -235,7 +235,7 @@ class SetupActivity : Activity() {
                 index = index.withLevel(path, it, System.currentTimeMillis())
                 folderStore.save(index)
             }
-            foldersJson(children, index.builtAtMillis, index.folders.size)
+            foldersJson(children, index.builtAtMillis, index.folders.size) { index.childrenOf(it)?.size }
         } catch (e: Exception) {
             Log.w(TAG, "не смог перечислить подпапки «$path»", e)
             foldersJson(emptyList(), 0, 0)

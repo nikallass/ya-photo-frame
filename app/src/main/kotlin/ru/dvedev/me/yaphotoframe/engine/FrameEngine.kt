@@ -398,6 +398,9 @@ class FrameEngine(
         return fetched
     }
 
+    /** Сколько подпапок у папки, если уровень уже разложен; null — не знаем. */
+    fun knownSubfolderCount(path: String): Int? = folderIndex.childrenOf(path)?.size
+
     /** Когда список папок собран; ноль — ни разу. */
     val foldersBuiltAtMillis: Long get() = folderIndex.builtAtMillis
 

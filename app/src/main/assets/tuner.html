@@ -117,13 +117,17 @@
   .treebar { display: flex; gap: 8px; margin-bottom: 10px; }
   .treebar .small { margin-top: 0; padding: 10px; font-size: 14px; }
   .node { display: flex; align-items: center; gap: 10px; padding: 9px 2px; }
-  .node .arrow { width: 22px; color: var(--muted); text-align: center; flex: none; }
-  .node .box { width: 24px; flex: none; color: var(--muted); }
+  .node .arrow { width: 22px; color: var(--muted); text-align: center; flex: none; cursor: pointer;
+                 padding: 4px 0; }
+  .node .arrow.leaf { cursor: default; }
+  .node .box { width: 24px; flex: none; color: var(--muted); cursor: pointer; padding: 4px 0; }
   .node.on > .box { color: var(--accent); }
   .node.inherited { color: var(--muted); }
-  .node .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .node .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                 color: inherit; text-decoration: underline dotted var(--muted);
+                 text-underline-offset: 3px; }
   .node.holds > .label { color: var(--accent); }
-  .node.holds > .label::before { content: '•'; margin-right: 6px; }
+  .node.holds > .label::before { content: '•'; margin-right: 6px; display: inline-block; text-decoration: none; }
   .node .arrow, .node .box { gap: 6px; }
   .node { gap: 6px; }
   .children { margin-left: 4px; border-left: 1px solid var(--line); padding-left: 5px; }
@@ -731,7 +735,10 @@ function showFolderAge() {
     : 'Дерево раскрывается по одному уровню, раз открытый уровень запоминается.';
 }
 
-function nodeView(name, path, depth) {
+// Три цели в строке: треугольник раскрывает, квадратик отмечает, название
+// открывает папку на Я.Диске. У папки без подпапок вместо треугольника точка —
+// когда это известно (уровень разложен или телевизор знает число подпапок).
+function nodeView(name, path, depth, kidCount) {
   const wrap = document.createElement('div');
   const row = document.createElement('div');
   row.className = 'node';
@@ -743,22 +750,26 @@ function nodeView(name, path, depth) {
 
   const kids = loaded.get(path);
   const open = expanded.has(path);
-  const arrow = kids && kids.length === 0 ? '·' : open ? '▾' : '▸';
+  const leaf = kids ? kids.length === 0 : kidCount === 0;
+  const arrow = leaf ? '·' : open ? '▾' : '▸';
 
-  row.innerHTML = '<span class="arrow">' + arrow + '</span>' +
+  row.innerHTML = '<span class="arrow' + (leaf ? ' leaf' : '') + '">' + arrow + '</span>' +
     '<span class="box">' + (checked ? '☑' : '☐') + '</span>' +
-    '<span class="label"></span>';
-  row.querySelector('.label').textContent = name;
-  row.querySelector('.label').title = name;
+    '<a class="label" target="_blank" rel="noopener"></a>';
+  const label = row.querySelector('.label');
+  label.textContent = name;
+  label.title = 'открыть на Я.Диске';
+  label.href = path === '/' ? (state.folderUrl || '#') : diskLink(path);
 
-  row.querySelector('.arrow').addEventListener('click', async event => {
+  if (!leaf) row.querySelector('.arrow').addEventListener('click', async event => {
     event.stopPropagation();
     if (expanded.has(path)) expanded.delete(path);
     else { expanded.add(path); await childrenOf(path); }
     drawTree();
   });
 
-  row.addEventListener('click', () => {
+  row.querySelector('.box').addEventListener('click', event => {
+    event.stopPropagation();
     if (isInherited(path)) {
       status.textContent = 'уже входит в отмеченную папку выше';
       return;
@@ -773,7 +784,7 @@ function nodeView(name, path, depth) {
     // Отступ растёт до четвёртого уровня, дальше только направляющая линия:
     // иначе глубокие папки уезжали за правый край телефона.
     box.className = 'children' + (depth >= 3 ? ' deep' : '');
-    for (const f of kids) box.appendChild(nodeView(f.name, f.path, depth + 1));
+    for (const f of kids) box.appendChild(nodeView(f.name, f.path, depth + 1, f.kids));
     wrap.appendChild(box);
   }
   return wrap;
@@ -793,7 +804,7 @@ function updateApplyBar() {
 function drawTree() {
   const tree = document.getElementById('tree');
   tree.innerHTML = '';
-  tree.appendChild(nodeView('Вся директория', '/', 0));
+  tree.appendChild(nodeView('Вся директория', '/', 0, undefined));
   updateApplyBar();
   status.textContent = selected.size
     ? 'отмечено папок: ' + selected.size
