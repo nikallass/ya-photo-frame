@@ -377,7 +377,10 @@ class FrameDreamService : DreamService() {
                 budgetBytes = MediaCache.reserveBudget(volume.root, { store.current.externalReserveBytes }),
             )
             cache.sweepLeftovers()
-            externalCurrent = ArchiveStore(cache, MediaFetcher(Http.client, cache))
+            externalCurrent = ArchiveStore(cache, MediaFetcher(Http.client, cache), volume.root)
+            if (externalCurrent?.maxFileBytes() != Long.MAX_VALUE) {
+                Diary.note("носитель ${volume.label}: FAT32, файлы больше 4 ГБ на него не поедут")
+            }
             externalUuid = wanted
             externalMissingNoted = false
             Diary.note("носитель ${volume.label}: ${volume.root.path}")

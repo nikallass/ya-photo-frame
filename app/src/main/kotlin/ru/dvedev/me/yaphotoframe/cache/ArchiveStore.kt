@@ -3,6 +3,8 @@ package ru.dvedev.me.yaphotoframe.cache
 import ru.dvedev.me.yaphotoframe.engine.ExternalStore
 import ru.dvedev.me.yaphotoframe.media.MediaItem
 import java.io.File
+import java.io.IOException
+import java.io.RandomAccessFile
 
 /**
  * Носитель поверх обычного кэша: ключ — путь на хранилище без ведущей косой.
@@ -15,7 +17,33 @@ import java.io.File
 class ArchiveStore(
     private val cache: MediaCache,
     private val fetcher: MediaFetcher,
+    /** Папка носителя — для пробы предела размера файла; null — без пробы. */
+    directory: File? = null,
 ) : ExternalStore {
+
+    /**
+     * Предел размера файла на носителе.
+     *
+     * FAT32 отказывает на четырёх гигабайтах — и узнать это, скачав четыре
+     * гигабайта, было бы обидно. Проба — растянуть пустой файл за предел:
+     * FAT32 откажет сразу, exFAT и NTFS согласятся.
+     */
+    private val limit: Long = directory?.let(::probeLimit) ?: Long.MAX_VALUE
+
+    override fun maxFileBytes(): Long = limit
+
+    private fun probeLimit(directory: File): Long {
+        val probe = File(directory, ".размер-пробы")
+        return try {
+            directory.mkdirs()
+            RandomAccessFile(probe, "rw").use { it.setLength(FAT32_LIMIT_BYTES + 1) }
+            Long.MAX_VALUE
+        } catch (e: IOException) {
+            FAT32_LIMIT_BYTES
+        } finally {
+            probe.delete()
+        }
+    }
 
     override fun has(path: String): Boolean = cache.has(key(path))
 
@@ -40,4 +68,8 @@ class ArchiveStore(
     fun freeBytes(): Long = cache.usableSpace()
 
     private fun key(path: String): String = path.trimStart('/')
+
+    private companion object {
+        const val FAT32_LIMIT_BYTES = 4L * 1024 * 1024 * 1024 - 1
+    }
 }

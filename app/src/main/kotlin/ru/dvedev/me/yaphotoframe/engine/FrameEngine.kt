@@ -746,7 +746,9 @@ class FrameEngine(
             val shownBytes = item.sizeBytes * shownMillis / duration
             if (shownBytes <= primeBudgetBytes() - PRIME_HEADROOM_BYTES) return PlannedDelivery.Stream
         }
-        return if (external() != null) PlannedDelivery.Archive else PlannedDelivery.Skip
+        val store = external() ?: return PlannedDelivery.Skip
+        // Файл, который на носитель не ляжет, качать нельзя: узналось бы на четвёртом гигабайте.
+        return if (item.sizeBytes <= store.maxFileBytes()) PlannedDelivery.Archive else PlannedDelivery.Skip
     }
 
     private suspend fun ensureCached(item: MediaItem): File =
@@ -935,6 +937,9 @@ interface ExternalStore {
 
     /** Освобождает место до запаса; возвращает, сколько файлов удалено. */
     fun evict(): Int
+
+    /** Крупнее какого файла носитель не примет: FAT32 не берёт больше 4 ГБ. */
+    fun maxFileBytes(): Long = Long.MAX_VALUE
 }
 
 /** Ход закачки на носитель. */
