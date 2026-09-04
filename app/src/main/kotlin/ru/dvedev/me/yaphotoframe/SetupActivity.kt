@@ -23,6 +23,7 @@ import ru.dvedev.me.yaphotoframe.library.FolderIndexStore
 import ru.dvedev.me.yaphotoframe.library.LibraryStore
 import ru.dvedev.me.yaphotoframe.media.yandex.YandexPublicDiskSource
 import ru.dvedev.me.yaphotoframe.settings.SettingsStore
+import ru.dvedev.me.yaphotoframe.settings.SettingsUi
 import ru.dvedev.me.yaphotoframe.tuner.TunerServer
 import ru.dvedev.me.yaphotoframe.tuner.foldersJson
 import ru.dvedev.me.yaphotoframe.tuner.jsonEscape
@@ -62,7 +63,7 @@ class SetupActivity : Activity() {
 
     private fun describeVolume(uuid: String): String {
         if (uuid.isBlank()) return "нет"
-        val volume = runCatching { media.volume(uuid) }.getOrNull() ?: return "$uuid — не подключён"
+        val volume = runCatching { media.volume(uuid) }.getOrNull() ?: return "$uuid — не подключена"
         volume.problem?.let { return "${volume.label}: $it" }
         return "${volume.label} ${volume.uuid}, свободно ${volume.freeBytes / 1_073_741_824} ГБ"
     }
@@ -266,95 +267,130 @@ class SetupActivity : Activity() {
             "из ${store.current.cacheBudgetBytes / 1024 / 1024} МБ"
     }
 
-    private fun buildRows() {
-        rows += Row(
-            title = "Папка на Яндекс.Диске",
-            hint = "публичная ссылка",
+    /** Как показать и подвинуть значение по ключу настройки; тексты — из settings-ui.json. */
+    private class Editor(
+        val show: (FrameSettings) -> String,
+        val edit: ((SetupActivity) -> Unit)? = null,
+        val step: (FrameSettings, Int) -> FrameSettings,
+    )
+
+    private fun toggle(show: (FrameSettings) -> Boolean, flip: (FrameSettings) -> FrameSettings) =
+        Editor(show = { yesNo(show(it)) }, step = { s, _ -> flip(s) })
+
+    private fun editors(): Map<String, Editor> = mapOf(
+        "folderUrl" to Editor(
             show = { it.folderUrl.removePrefix(LINK_PREFIX).ifEmpty { "не указана" } },
             edit = { it.editFolderUrl() },
             step = { settings, _ -> settings },
-        )
-        rows += Row("Интервал показа", "сколько висит кадр", { format(it.showDurationMillis) }) { s, d ->
+        ),
+        "showDurationMillis" to Editor({ format(it.showDurationMillis) }) { s, d ->
             s.copy(showDurationMillis = nudge(s.showDurationMillis, d, 5_000L))
-        }
-        rows += Row("Переход", "длительность смены", { format(it.crossfadeMillis) }) { s, d ->
+        },
+        "crossfadeMillis" to Editor({ format(it.crossfadeMillis) }) { s, d ->
             s.copy(crossfadeMillis = (s.crossfadeMillis + d * 250L).coerceIn(0L, 10_000L))
-        }
-        rows += Row("Длина хода", "насколько уезжает кадр", { percent(it.driftAmplitude) }) { s, d ->
-            s.copy(driftAmplitude = s.driftAmplitude + d * 0.005f)
-        }
-        rows += Row("Приближение", "на сколько кадр вырастает", { percent(it.zoomAmount) }) { s, d ->
-            s.copy(zoomAmount = s.zoomAmount + d * 0.01f)
-        }
-        rows += Row("Размер кадра", "доля экрана", { percent(it.frameInset) }) { s, d ->
-            s.copy(frameInset = s.frameInset + d * 0.01f)
-        }
-        rows += Row("Смещение от центра", "золотое сечение", { percent(it.placementStrength) }) { s, d ->
-            s.copy(placementStrength = s.placementStrength + d * 0.05f)
-        }
-        rows += Row("Затемнение фона", "0 — как есть", { percent(it.backgroundDim) }) { s, d ->
-            s.copy(backgroundDim = s.backgroundDim + d * 0.05f)
-        }
-        rows += Row("Размытие фона", "меньше — сильнее", { "${it.blurSampleLongSide} пикс." }) { s, d ->
-            s.copy(blurSampleLongSide = s.blurSampleLongSide + d)
-        }
-        rows += Row("Кеш для фото", "копии снимков и лёгкие ролики", { megabytes(it.cacheBudgetBytes) }) { s, d ->
-            s.copy(cacheBudgetBytes = s.cacheBudgetBytes + d * 64L * 1024 * 1024)
-        }
-        rows += Row("Порог кэширования", "тяжелее — потоком", { megabytes(it.cacheItemThresholdBytes) }) { s, d ->
-            s.copy(cacheItemThresholdBytes = s.cacheItemThresholdBytes + d * 10L * 1024 * 1024)
-        }
-        rows += Row("Предзагрузка", "кадров вперёд", { "${it.prefetchCount}" }) { s, d ->
-            s.copy(prefetchCount = s.prefetchCount + d)
-        }
-        rows += Row("Переобход папки", "не чаще чем раз в", { format(it.indexRefreshIntervalMillis) }) { s, d ->
-            s.copy(indexRefreshIntervalMillis = s.indexRefreshIntervalMillis + d * 15L * 60 * 1000)
-        }
-        rows += Row("Видео", "показывать ролики", { yesNo(it.showVideo) },
-            step = { s, _ -> s.copy(showVideo = !s.showVideo) })
-        rows += Row("Ролик не дольше", "0 — до конца", { format(it.videoMaxDurationMillis) },
-            step = { s, d -> s.copy(videoMaxDurationMillis = (s.videoMaxDurationMillis + d * 30_000L).coerceAtLeast(0L)) })
-        rows += Row("Ролик не тяжелее", "0 — без ограничения",
-            { if (it.videoMaxSizeBytes <= 0) "без ограничения" else "${it.videoMaxSizeBytes / 1_048_576} МБ" }) { s, d ->
-            s.copy(videoMaxSizeBytes = (s.videoMaxSizeBytes + d * 128L * 1_048_576).coerceAtLeast(0L))
-        }
-        rows += Row("Буфер для видео", "начало ролика из сети заранее; 0 — нет",
-            { if (it.streamBufferBytes <= 0) "нет" else "${it.streamBufferBytes / 1_048_576} МБ" }) { s, d ->
-            s.copy(streamBufferBytes = (s.streamBufferBytes + d * 128L * 1_048_576).coerceAtLeast(0L))
-        }
-        rows += Row("Канал", "выше — не потоком; 0 — всё потоком",
-            { if (it.streamMaxBitrateBps <= 0) "без ограничения" else "${it.streamMaxBitrateBps / 1_000_000} Мбит/с" }) { s, d ->
-            s.copy(streamMaxBitrateBps = (s.streamMaxBitrateBps + d * 5_000_000L).coerceAtLeast(0L))
-        }
-        rows += Row("Носитель", "флешка под тяжёлые ролики", { describeVolume(it.externalStorageUuid) }) { s, d ->
-            s.copy(externalStorageUuid = nextVolume(s.externalStorageUuid, d))
-        }
-        rows += Row("Запас на носителе", "столько не занимать",
-            { "%.1f ГБ".format(it.externalReserveBytes / 1_073_741_824.0) }) { s, d ->
-            s.copy(externalReserveBytes = (s.externalReserveBytes + d * 536_870_912L).coerceAtLeast(0L))
-        }
-        rows += Row("Звук в роликах", "по умолчанию нет", { yesNo(it.videoSoundEnabled) },
-            step = { s, _ -> s.copy(videoSoundEnabled = !s.videoSoundEnabled) })
-        rows += Row("Минимальная ширина", "уже — не показывать",
-            { if (it.minPhotoFraction <= 0f) "всё" else "${(it.minPhotoFraction * 100).toInt()} %" },
-            step = { s, d -> s.copy(minPhotoFraction = (s.minPhotoFraction + d * 0.05f).coerceIn(0f, 0.6f)) })
-        rows += Row("Пары вертикальных", "два снимка рядом", { yesNo(it.pairPortraits) },
-            step = { s, _ -> s.copy(pairPortraits = !s.pairPortraits) })
-        rows += Row("Пауза не дольше", "0 — пока не снимут", { if (it.pauseAutoResumeMillis <= 0) "бессрочно" else "${it.pauseAutoResumeMillis / 60_000} мин" }) { s, d ->
+        },
+        "pauseAutoResumeMillis" to Editor(
+            { if (it.pauseAutoResumeMillis <= 0) "пока не снимут" else "${it.pauseAutoResumeMillis / 60_000} мин" },
+        ) { s, d ->
             s.copy(pauseAutoResumeMillis = (s.pauseAutoResumeMillis + d * 60_000L).coerceAtLeast(0L))
-        }
-        rows += Row("Часы", "поверх кадра", { yesNo(it.showClock) },
-            step = { s, _ -> s.copy(showClock = !s.showClock) })
-        rows += Row("Дата съёмки", "поверх кадра", { yesNo(it.showDate) },
-            step = { s, _ -> s.copy(showDate = !s.showDate) })
-        rows += Row(
-            title = "Страница настройки",
-            hint = "в домашней сети",
+        },
+        "driftAmplitude" to Editor({ if (it.driftAmplitude <= 0f) "неподвижен" else percent(it.driftAmplitude) }) { s, d ->
+            s.copy(driftAmplitude = s.driftAmplitude + d * 0.005f)
+        },
+        "zoomAmount" to Editor({ if (it.zoomAmount <= 0f) "нет" else percent(it.zoomAmount) }) { s, d ->
+            s.copy(zoomAmount = s.zoomAmount + d * 0.01f)
+        },
+        "frameInset" to Editor({ percent(it.frameInset) }) { s, d ->
+            s.copy(frameInset = s.frameInset + d * 0.01f)
+        },
+        "placementStrength" to Editor({ percent(it.placementStrength) }) { s, d ->
+            s.copy(placementStrength = s.placementStrength + d * 0.05f)
+        },
+        "edgeMargin" to Editor({ percent(it.edgeMargin) }) { s, d ->
+            s.copy(edgeMargin = s.edgeMargin + d * 0.01f)
+        },
+        "backgroundDim" to Editor({ percent(it.backgroundDim) }) { s, d ->
+            s.copy(backgroundDim = s.backgroundDim + d * 0.05f)
+        },
+        // В настройке пиксели фона (меньше — размытее), на экране сила размытия
+        // в процентах: вправо — сильнее, как и на странице.
+        "blurSampleLongSide" to Editor({ "${blurStrength(it.blurSampleLongSide)} %" }) { s, d ->
+            s.copy(blurSampleLongSide = (s.blurSampleLongSide - d * 3).coerceIn(2, 64))
+        },
+        "showVideo" to toggle({ it.showVideo }) { it.copy(showVideo = !it.showVideo) },
+        "videoSoundEnabled" to toggle({ it.videoSoundEnabled }) { it.copy(videoSoundEnabled = !it.videoSoundEnabled) },
+        "pairPortraits" to toggle({ it.pairPortraits }) { it.copy(pairPortraits = !it.pairPortraits) },
+        "minPhotoFraction" to Editor(
+            { if (it.minPhotoFraction <= 0f) "показывать всё" else "${(it.minPhotoFraction * 100).toInt()} % экрана" },
+        ) { s, d -> s.copy(minPhotoFraction = (s.minPhotoFraction + d * 0.05f).coerceIn(0f, 0.6f)) },
+        "freshnessWindowDays" to Editor({ "${it.freshnessWindowDays} дн." }) { s, d ->
+            s.copy(freshnessWindowDays = (s.freshnessWindowDays + d).coerceIn(1, 3650))
+        },
+        "showClock" to toggle({ it.showClock }) { it.copy(showClock = !it.showClock) },
+        "showDate" to toggle({ it.showDate }) { it.copy(showDate = !it.showDate) },
+        "videoMaxDurationMillis" to Editor({ format(it.videoMaxDurationMillis) }) { s, d ->
+            s.copy(videoMaxDurationMillis = (s.videoMaxDurationMillis + d * 30_000L).coerceAtLeast(0L))
+        },
+        "videoMaxSizeBytes" to Editor(
+            { if (it.videoMaxSizeBytes <= 0) "без ограничения" else "${it.videoMaxSizeBytes / 1_048_576} МБ" },
+        ) { s, d -> s.copy(videoMaxSizeBytes = (s.videoMaxSizeBytes + d * 128L * 1_048_576).coerceAtLeast(0L)) },
+        "streamBufferBytes" to Editor(
+            { if (it.streamBufferBytes <= 0) "нет" else "${it.streamBufferBytes / 1_048_576} МБ" },
+        ) { s, d -> s.copy(streamBufferBytes = (s.streamBufferBytes + d * 128L * 1_048_576).coerceAtLeast(0L)) },
+        "streamMaxBitrateBps" to Editor(
+            { if (it.streamMaxBitrateBps <= 0) "всё стримится" else "${it.streamMaxBitrateBps / 1_000_000} Мбит/с" },
+        ) { s, d -> s.copy(streamMaxBitrateBps = (s.streamMaxBitrateBps + d * 5_000_000L).coerceAtLeast(0L)) },
+        "cacheItemThresholdBytes" to Editor({ megabytes(it.cacheItemThresholdBytes) }) { s, d ->
+            s.copy(cacheItemThresholdBytes = s.cacheItemThresholdBytes + d * 10L * 1024 * 1024)
+        },
+        "externalStorageUuid" to Editor({ describeVolume(it.externalStorageUuid) }) { s, d ->
+            s.copy(externalStorageUuid = nextVolume(s.externalStorageUuid, d))
+        },
+        "externalReserveBytes" to Editor({ "%.1f ГБ".format(it.externalReserveBytes / 1_073_741_824.0) }) { s, d ->
+            s.copy(externalReserveBytes = (s.externalReserveBytes + d * 536_870_912L).coerceAtLeast(0L))
+        },
+        "cacheBudgetBytes" to Editor({ megabytes(it.cacheBudgetBytes) }) { s, d ->
+            s.copy(cacheBudgetBytes = s.cacheBudgetBytes + d * 64L * 1024 * 1024)
+        },
+        "prefetchCount" to Editor({ "${it.prefetchCount}" }) { s, d ->
+            s.copy(prefetchCount = s.prefetchCount + d)
+        },
+        "indexRefreshIntervalMillis" to Editor({ format(it.indexRefreshIntervalMillis) }) { s, d ->
+            s.copy(indexRefreshIntervalMillis = s.indexRefreshIntervalMillis + d * 15L * 60 * 1000)
+        },
+        "tunerEnabled" to Editor(
             show = { if (it.tunerEnabled) "включена" else "выключена" },
             step = { s, _ -> s.copy(tunerEnabled = !s.tunerEnabled) },
-        )
+        ),
+    )
 
-        rows.forEach { row -> container.addView(rowView(row)) }
+    private fun blurStrength(pixels: Int) = Math.round((64 - pixels) * 100f / 62)
+
+    /**
+     * Строки — по тому же файлу, что и страница: те же разделы, порядок и слова.
+     * Заголовок раздела — обычная подпись без фокуса, пульт её перешагивает.
+     */
+    private fun buildRows() {
+        val ui = SettingsUi.parse(assets.open(SettingsUi.ASSET).bufferedReader().use { it.readText() })
+        val editors = editors()
+        val sections = ui.sections.filter { it.items.isNotEmpty() } +
+            SettingsUi.Section(id = "app", title = "Приложение", note = "", items = ui.app)
+        for (section in sections) {
+            if (section.title.isNotBlank()) {
+                container.addView(label(section.title, 20f, TEXT).apply { setPadding(0, PADDING, 0, 0) })
+                if (section.note.isNotBlank()) container.addView(label(section.note, 13f, MUTED))
+            }
+            for (item in section.items) {
+                val editor = editors[item.key]
+                if (editor == null) {
+                    Log.w(TAG, "нет редактора для ${item.key}")
+                    continue
+                }
+                val row = Row(item.title, item.note, editor.show, editor.edit, editor.step)
+                rows += row
+                container.addView(rowView(row))
+            }
+        }
     }
 
     private fun rowView(row: Row): View {
