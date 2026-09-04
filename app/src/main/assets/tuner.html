@@ -99,7 +99,11 @@
   .list { font-size: 12.5px; line-height: 1.5; color: var(--muted);
           font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
           max-height: 260px; overflow: auto; }
-  .list div { padding: 1px 0; }
+  .list div { padding: 1px 0; overflow-wrap: anywhere; }
+  .list .item { padding: 4px 0; }
+  .list .dir { font-size: 11px; opacity: .7; direction: rtl; text-align: left; white-space: nowrap;
+               overflow: hidden; text-overflow: ellipsis; padding: 0; }
+  .list .item.full .dir { direction: ltr; white-space: normal; }
   .list .bad { color: var(--bad); }
   .list a { color: var(--fg); text-decoration: none; border-bottom: 1px dotted var(--muted); }
   .volume { display: flex; gap: 10px; align-items: center; padding: 9px 2px; cursor: pointer; }
@@ -109,7 +113,7 @@
   .volume.bad { cursor: default; }
   .volume.bad, .volume.bad small { color: var(--bad); }
   .empty { color: var(--muted); font-size: 13px; }
-  .tree { font-size: 15px; }
+  .tree { font-size: 15px; overflow-x: auto; }
   .treebar { display: flex; gap: 8px; margin-bottom: 10px; }
   .treebar .small { margin-top: 0; padding: 10px; font-size: 14px; }
   .node { display: flex; align-items: center; gap: 10px; padding: 9px 2px; }
@@ -118,7 +122,12 @@
   .node.on > .box { color: var(--accent); }
   .node.inherited { color: var(--muted); }
   .node .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .children { margin-left: 22px; border-left: 1px solid var(--line); padding-left: 8px; }
+  .node.holds > .label { color: var(--accent); }
+  .node.holds > .label::before { content: '•'; margin-right: 6px; }
+  .node .arrow, .node .box { gap: 6px; }
+  .node { gap: 6px; }
+  .children { margin-left: 10px; border-left: 1px solid var(--line); padding-left: 6px; }
+  .children.deep { margin-left: 0; }
   /* Раздел: заголовок и одна строка под ним; строки настроек идут карточками ниже. */
   .section { margin: 22px 0 10px; }
   .section:first-child { margin-top: 0; }
@@ -691,6 +700,10 @@ const loaded = new Map();
 
 const isInherited = path =>
   [...selected].some(s => s !== path && path.startsWith(s === '/' ? '/' : s + '/'));
+// Внутри папки где-то есть отмеченная — она подсвечивается, чтобы отбор было
+// видно и в свёрнутом дереве.
+const holdsSelected = path =>
+  [...selected].some(s => s !== path && s.startsWith(path === '/' ? '/' : path + '/'));
 
 let foldersBuiltAt = 0, foldersKnown = 0;
 
@@ -720,6 +733,7 @@ function nodeView(name, path, depth) {
   const checked = selected.has(path) || inherited;
   if (selected.has(path)) row.classList.add('on');
   if (inherited) row.classList.add('inherited');
+  if (!checked && holdsSelected(path)) row.classList.add('holds');
 
   const kids = loaded.get(path);
   const open = expanded.has(path);
@@ -729,6 +743,7 @@ function nodeView(name, path, depth) {
     '<span class="box">' + (checked ? '☑' : '☐') + '</span>' +
     '<span class="label"></span>';
   row.querySelector('.label').textContent = name;
+  row.querySelector('.label').title = name;
 
   row.querySelector('.arrow').addEventListener('click', async event => {
     event.stopPropagation();
@@ -749,7 +764,9 @@ function nodeView(name, path, depth) {
   wrap.appendChild(row);
   if (open && kids) {
     const box = document.createElement('div');
-    box.className = 'children';
+    // Отступ растёт до четвёртого уровня, дальше только направляющая линия:
+    // иначе глубокие папки уезжали за правый край телефона.
+    box.className = 'children' + (depth >= 3 ? ' deep' : '');
     for (const f of kids) box.appendChild(nodeView(f.name, f.path, depth + 1));
     wrap.appendChild(box);
   }
@@ -778,16 +795,10 @@ function drawTree() {
 }
 
 async function renderTree() {
-  // Раскрываем путь к каждой отмеченной папке: иначе владелец видит корень и
-  // не понимает, отмечено ли хоть что-то и где именно.
+  // При открытии страницы раскрыт только корень: большой отбор иначе
+  // разворачивался простынёй. Где внутри есть отмеченное, видно по подсветке.
   expanded = new Set(['/']);
-  for (const path of selected) {
-    const parts = path.split('/').filter(Boolean);
-    let acc = '';
-    for (const part of parts) { expanded.add(acc || '/'); acc += '/' + part; }
-    expanded.add(path);
-  }
-  for (const path of expanded) await childrenOf(path);
+  await childrenOf('/');
   showFolderAge();
   drawTree();
 }
@@ -862,24 +873,33 @@ document.getElementById('clearfolders').addEventListener('click', async () => {
 
 // ── вкладка состояния ──────────────────────────────────────────────────────
 
+// Открытая вкладка живёт в hash адреса: перезагрузка страницы и ссылка с
+// #state возвращают туда же. Пишется через replaceState, чтобы каждое
+// переключение не ложилось в историю браузера.
+const VIEWS = ['tune', 'folders', 'state'];
 let view = 'tune', poll = null;
-for (const tab of document.querySelectorAll('.tab')) {
-  tab.addEventListener('click', () => {
-    view = tab.dataset.view;
-    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t === tab));
-    for (const id of ['tune', 'folders', 'state']) {
-      document.getElementById(id).hidden = view !== id;
-    }
-    clearInterval(poll);
-    if (view === 'state') { loadState(); poll = setInterval(loadState, 4000); }
-    if (view === 'folders') {
-      selected = new Set(state.selectedFolders || []);
-      appliedSelection = selectionKey();
-      renderTree();
-    }
-    updateApplyBar();
-  });
+function showView(name) {
+  if (!VIEWS.includes(name)) name = 'tune';
+  view = name;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.dataset.view === name));
+  for (const id of VIEWS) document.getElementById(id).hidden = view !== id;
+  clearInterval(poll);
+  if (view === 'state') { loadState(); poll = setInterval(loadState, 4000); }
+  if (view === 'folders') {
+    selected = new Set(state.selectedFolders || []);
+    appliedSelection = selectionKey();
+    renderTree();
+  }
+  updateApplyBar();
+  if (location.hash.slice(1) !== name) history.replaceState(null, '', '#' + name);
 }
+for (const tab of document.querySelectorAll('.tab')) {
+  tab.addEventListener('click', () => showView(tab.dataset.view));
+}
+window.addEventListener('hashchange', () => {
+  const name = location.hash.slice(1);
+  if (name !== view) showView(name);
+});
 
 // ── чем рамка занята ───────────────────────────────────────────────────────
 
@@ -953,11 +973,15 @@ const list = (items, bad) => items.length
 // Файл внутри общедоступной папки открывается по адресу папки плюс путь.
 const diskLink = path => (state.folderUrl || '').replace(/\/+$/, '') +
   path.split('/').map(encodeURIComponent).join('/');
+// Имя файла строкой, папка под ним серым с обрезанным началом: длинный путь
+// иначе ломал ширину страницы. Тап по строке разворачивает папку целиком.
+const dirOf = path => path.slice(0, path.lastIndexOf('/') + 1) || '/';
 const linked = items => items.length
   ? items.map(x => typeof x === 'string' ? '<div>' + escapeHtml(x) + '</div>'
-    : '<div><a href="' + diskLink(x.path).replace(/"/g, '&quot;') + '" target="_blank" rel="noopener">' +
+    : '<div class="item" onclick="this.classList.toggle(\'full\')">' +
+      '<a href="' + diskLink(x.path).replace(/"/g, '&quot;') + '" target="_blank" rel="noopener">' +
       escapeHtml(x.name) + '</a>' + (x.bitrate ? ' <small>' + Math.round(x.bitrate / 1000000) + ' Мбит/с</small>' : '') +
-      '</div>').join('')
+      '<div class="dir"><bdi>' + escapeHtml(dirOf(x.path)) + '</bdi></div></div>').join('')
   : '<div class="empty">пусто</div>';
 
 async function loadState() {
@@ -1088,6 +1112,7 @@ setInterval(() => { if (!dragging && timer === null && view === 'tune') loadSett
   loadVolumes();
   setInterval(loadVolumes, 10000);
   if (await loadSettings()) status.textContent = 'готов';
+  if (location.hash.slice(1) && location.hash.slice(1) !== 'tune') showView(location.hash.slice(1));
 })();
 </script>
 </body>
