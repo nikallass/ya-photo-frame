@@ -914,6 +914,23 @@ class FrameEngineTest {
     }
 
     @Test
+    fun `замеренная длительность переживает переобход`() = runTest {
+        switchToCacheFolder()
+        val engine = library(
+            pageLimit = 50, includeVideo = true, channelBps = 50_000_000L,
+            prober = prober(6_000_000_000L to 100_000L),
+        )
+        engine.sync()
+        engine.prefetch()
+        engine.awaitProbing()
+        val huge = engine.entries.single { it.item.name == "огромное.mov" }.item
+        assertTrue("замерено", engine.bitrateOf(huge.path) != null)
+
+        engine.sync()
+        assertTrue("после переобхода замер на месте", engine.bitrateOf(huge.path) != null)
+    }
+
+    @Test
     fun `пока на экране ролик, закачка на флешку не начинается`() = runTest {
         switchToCacheFolder()
         val store = archive()

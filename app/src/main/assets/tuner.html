@@ -104,6 +104,8 @@
   .list .dir { font-size: 11px; opacity: .7; direction: rtl; text-align: left; white-space: nowrap;
                overflow: hidden; text-overflow: ellipsis; padding: 0; }
   .list .item.full .dir { direction: ltr; white-space: normal; }
+  /* Ролик ещё не докачан — очередь пройдёт мимо него, пока он не готов. */
+  .list .item.wait { opacity: .45; }
   .list .bad { color: var(--bad); }
   .list a { color: var(--text); text-decoration: none; border-bottom: 1px dotted var(--muted); }
   .volume { display: flex; gap: 10px; align-items: center; padding: 9px 2px; cursor: pointer; }
@@ -143,7 +145,6 @@
      ложится на пустое место, а не на буквы. */
   .node .label { flex: 1 0 auto; white-space: nowrap; padding-right: 44px; }
   .node.holds > .label { color: var(--accent); }
-  .node.holds > .label::before { content: '•'; margin-right: 6px; }
   .node .arrow, .node .box { gap: 6px; }
   .node { gap: 6px; }
   .children { margin-left: 4px; border-left: 1px solid var(--line); padding-left: 5px; }
@@ -1016,9 +1017,10 @@ const diskLink = path => (state.folderUrl || '').replace(/\/+$/, '') +
 const dirOf = path => path.slice(0, path.lastIndexOf('/') + 1) || '/';
 const linked = items => items.length
   ? items.map(x => typeof x === 'string' ? '<div>' + escapeHtml(x) + '</div>'
-    : '<div class="item" onclick="this.classList.toggle(\'full\')">' +
+    : '<div class="item' + (x.waiting ? ' wait' : '') + '" onclick="this.classList.toggle(\'full\')">' +
       '<a href="' + diskLink(x.path).replace(/"/g, '&quot;') + '" target="_blank" rel="noopener">' +
       escapeHtml(x.name) + '</a>' + (x.bitrate ? ' <small>' + Math.round(x.bitrate / 1000000) + ' Мбит/с</small>' : '') +
+      (x.waiting ? ' <small>ждёт закачки</small>' : '') +
       '<div class="dir"><bdi>' + escapeHtml(dirOf(x.path)) + '</bdi></div></div>').join('')
   : '<div class="empty">пусто</div>';
 
@@ -1042,7 +1044,8 @@ async function loadState() {
     const i = d.index, c = d.cache;
     document.getElementById('index').innerHTML =
       kv('всего файлов', i.total) + kv('фотографий', i.photos) + kv('видео', i.videos) +
-      kv('нечем показать', i.unshowable) + kv('мельче порога', i.tooSmall) + kv('показано хоть раз', i.shown) +
+      kv('нечем показать', i.unshowable) + kv('мельче порога', i.tooSmall) +
+      (i.undecodable ? kv('телевизор не декодирует', i.undecodable) : '') + kv('показано хоть раз', i.shown) +
       kv('последний обход', i.syncedAt ? new Date(i.syncedAt).toLocaleString('ru-RU') : 'не было') +
       (d.indexing ? kv('идёт обход', d.indexing.files + ' файлов в ' + d.indexing.folders + ' папках…') : '');
     const pr = c.priming;

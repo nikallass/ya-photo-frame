@@ -921,6 +921,13 @@ class FrameDreamService : DreamService() {
                 Diary.problem("не удалось проиграть ${prepared.item.name}", error)
                 slideshow?.page(1)
             },
+            onUnsupported = { codec ->
+                // Декодер такой профиль не берёт, а взявшись, рисует полосами:
+                // ролик вон из очереди насовсем, в индексе пометка.
+                Diary.problem("телевизор не декодирует ${prepared.item.name} ($codec) — ролик больше не показывается")
+                scope.launch { engine?.markUndecodable(prepared.item.path) }
+                slideshow?.page(1)
+            },
             onSizeKnown = { width, height ->
                 slideshowView?.fitVideo(width, height, store.current.frameInset)
             },
@@ -1023,6 +1030,7 @@ class FrameDreamService : DreamService() {
             append("\"shown\":").append(index?.shown ?: 0).append(',')
             append("\"failed\":").append(index?.failed ?: 0).append(',')
             append("\"tooSmall\":").append(index?.tooSmall ?: 0).append(',')
+            append("\"undecodable\":").append(index?.undecodable ?: 0).append(',')
             append("\"syncedAt\":").append(index?.syncedAtMillis ?: 0).append(',')
             // Пока идёт обход, страница показывает, сколько уже пройдено:
             // на большом Диске это минуты, и без счётчика кажется, что рамка
@@ -1076,8 +1084,10 @@ class FrameDreamService : DreamService() {
     private fun jsonItems(items: List<ru.dvedev.me.yaphotoframe.media.MediaItem>): String =
         items.joinToString(",", "[", "]") {
             val bitrate = engine?.bitrateOf(it.path)
+            val waiting = engine?.waiting(it) == true
             "{\"name\":\"" + escape(it.name) + "\",\"path\":\"" + escape(it.path) + "\"" +
-                (if (bitrate != null) ",\"bitrate\":$bitrate" else "") + "}"
+                (if (bitrate != null) ",\"bitrate\":$bitrate" else "") +
+                (if (waiting) ",\"waiting\":true" else "") + "}"
         }
 
     private fun jsonArray(values: List<String>): String =

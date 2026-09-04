@@ -5,8 +5,12 @@ import android.net.Uri
 import android.view.TextureView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
+import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.LoadControl
@@ -41,6 +45,12 @@ class VideoPlayback(private val context: Context) {
         soundEnabled: Boolean,
         onEnded: () -> Unit,
         onFailed: (Throwable) -> Unit,
+        /**
+         * Ни один декодер телевизора не заявляет поддержку профиля ролика.
+         * Плеер в таком случае всё равно берёт ближайший и получает от него
+         * мусор — зелёные полосы вместо кадра; лучше не начинать.
+         */
+        onUnsupported: (String) -> Unit = {},
         onSizeKnown: (Int, Int) -> Unit,
         /**
          * Ролик пошёл: кадры сменяются. Именно пошёл, а не отрисовал первый
@@ -79,6 +89,15 @@ class VideoPlayback(private val context: Context) {
                     if (isPlaying && !playing) {
                         playing = true
                         onPlaying()
+                    }
+                }
+
+                override fun onTracksChanged(tracks: Tracks) {
+                    val video = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_VIDEO } ?: return
+                    val format = video.getTrackFormat(0)
+                    if (!decodable(format)) {
+                        stop()
+                        onUnsupported(format.codecs ?: format.sampleMimeType ?: "?")
                     }
                 }
 
@@ -131,6 +150,19 @@ class VideoPlayback(private val context: Context) {
         .setTargetBufferBytes(if (streamed) STREAM_BUFFER_BYTES else TARGET_BUFFER_BYTES)
         .setPrioritizeTimeOverSizeThresholds(false)
         .build()
+
+    /** Есть ли декодер, который заявляет поддержку профиля и уровня ролика. */
+    private fun decodable(format: Format): Boolean {
+        val mime = format.sampleMimeType ?: return true
+        val infos = try {
+            MediaCodecUtil.getDecoderInfos(mime, false, false)
+        } catch (e: Exception) {
+            return true
+        }
+        // Без единого декодера плеер сам упадёт с понятной ошибкой.
+        if (infos.isEmpty()) return true
+        return infos.any { it.isFormatSupported(format) }
+    }
 
     /** Сколько длится ролик; ноль — плеер ещё не выяснил. */
     fun durationMillis(): Long = player?.duration?.takeIf { it > 0 } ?: 0L

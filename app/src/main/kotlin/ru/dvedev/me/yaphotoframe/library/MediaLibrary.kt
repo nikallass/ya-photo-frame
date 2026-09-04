@@ -93,6 +93,10 @@ class MediaLibrary(
                 firstSeenAtMillis =
                     if (known != null) known.firstSeenAtMillis else now.takeUnless { firstSync },
                 previewLongSidePx = known?.previewLongSidePx,
+                // Замер и приговор декодера — тоже знание о файле, а не об
+                // обходе: без этого каждый переобход мерил бы ролики заново.
+                durationMillis = known?.durationMillis,
+                undecodable = known?.undecodable ?: false,
             )
         }
 
@@ -173,6 +177,17 @@ class MediaLibrary(
 
     /** Запоминает длительность ролика; 0 — заголовок не разобрался. */
     @Synchronized
+    /** Телевизор не декодирует ролик — запомнить, чтобы не ставить в очередь снова. */
+    fun recordUndecodable(path: String) {
+        val index = snapshot.entries.indexOfFirst { it.item.path == path }
+        if (index < 0) return
+
+        val updated = snapshot.entries.toMutableList()
+        updated[index] = updated[index].copy(undecodable = true)
+        snapshot = snapshot.copy(entries = updated)
+        scheduleSave()
+    }
+
     fun recordDuration(path: String, millis: Long) {
         val index = snapshot.entries.indexOfFirst { it.item.path == path }
         if (index < 0) return

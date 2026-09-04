@@ -216,12 +216,22 @@ class FrameEngine(
             chosen.includes(entry.item.path) &&
                 (minimum <= 0 || !entry.isSmallerThan(minimum)) &&
                 (heaviest <= 0 || entry.item.kind != MediaKind.VIDEO || entry.item.sizeBytes <= heaviest) &&
+                !entry.undecodable &&
                 deliveryPlan(entry.item) != PlannedDelivery.Skip
         }
     }
 
     /** Битрейт ролика, если длительность уже измерена. */
     fun bitrateOf(path: String): Long? = entryOf(path)?.bitrateBps
+
+    /** Декодер не берёт ролик: пометить в индексе и убрать из очереди. */
+    suspend fun markUndecodable(path: String) {
+        library.recordUndecodable(path)
+        queueLock.withLock { queue.remove(path) }
+    }
+
+    /** Ролик стоит в очереди, но на экран пока не идёт — ждёт замера, подкачки или флешки. */
+    fun waiting(item: MediaItem): Boolean = isWaiting(item)
 
     /** Сколько роликов ждут флешки: тяжелее канала, а класть некуда. */
     fun waitingForStorage(): Int {
@@ -453,6 +463,7 @@ class FrameEngine(
             photos = entries.count { it.item.kind == MediaKind.PHOTO },
             videos = entries.count { it.item.kind == MediaKind.VIDEO },
             unshowable = entries.count { !it.item.isShowable },
+            undecodable = entries.count { it.undecodable },
             shown = entries.count { it.lastShownAtMillis != null },
             syncedAtMillis = library.syncedAtMillis,
             failed = synchronized(failures) { failures.size },
@@ -930,6 +941,8 @@ data class IndexState(
     val failed: Int,
     /** Сколько снимков измерено и оказалось мельче порога. */
     val tooSmall: Int = 0,
+    /** Сколько роликов телевизор не декодирует. */
+    val undecodable: Int = 0,
 )
 
 /** Занятость кэша; буфер потока лежит отдельно и в бюджет не входит. */
