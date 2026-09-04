@@ -87,6 +87,8 @@
             color: var(--muted); font-size: 12px; }
   .kv { display: flex; justify-content: space-between; padding: 3px 0; font-size: 14px; }
   .kv span:last-child { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .kv span:last-child { max-width: 70%; text-align: right; overflow-wrap: anywhere; word-break: break-all; }
+  .kv.path span:last-child { font-size: 12px; }
   .bar { height: 8px; background: #0f1116; border-radius: 4px; overflow: hidden; margin-top: 8px; }
   .bar i { display: block; height: 100%; background: var(--accent); }
   .hours { display: flex; align-items: flex-end; gap: 2px; height: 70px; margin-top: 10px; }
@@ -878,6 +880,8 @@ pollStatus();
 const bytes = n => n >= 1073741824 ? (n / 1073741824).toFixed(2) + ' ГБ'
   : n >= 1048576 ? (n / 1048576).toFixed(1) + ' МБ' : Math.round(n / 1024) + ' КБ';
 const kv = (k, v) => '<div class="kv"><span>' + k + '</span><span>' + v + '</span></div>';
+// Длинный путь переносится по символам и мельче: иначе он уезжал за край экрана.
+const kvPath = (k, v) => '<div class="kv path"><span>' + k + '</span><span>' + escapeHtml(v) + '</span></div>';
 const list = (items, bad) => items.length
   ? items.map(x => '<div' + (bad ? ' class="bad"' : '') + '>' + escapeHtml(x) + '</div>').join('')
   : '<div class="empty">пусто</div>';
@@ -924,7 +928,7 @@ async function loadState() {
     document.getElementById('external').innerHTML = !x.uuid
       ? kv('носитель', 'не выбран') + kv('ждут носителя', x.waiting || 0)
       : kv('носитель', (x.label || x.uuid) + (x.present ? '' : ' — ' + (x.problem || 'не подключён'))) +
-        (x.present ? kv('папка', x.path) + kv('занято', bytes(x.usedBytes)) + kv('свободно', bytes(x.freeBytes)) +
+        (x.present ? kvPath('папка', x.path) + kv('занято', bytes(x.usedBytes)) + kv('свободно', bytes(x.freeBytes)) +
           kv('файлов', x.files) : '') + kv('ждут носителя', x.waiting || 0);
     document.getElementById('externalbar').style.width =
       (x.present && x.totalBytes ? (x.totalBytes - x.freeBytes) / x.totalBytes * 100 : 0) + '%';
