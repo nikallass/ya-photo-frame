@@ -304,7 +304,7 @@ class SetupActivity : Activity() {
         rows += Row("Размытие фона", "меньше — сильнее", { "${it.blurSampleLongSide} пикс." }) { s, d ->
             s.copy(blurSampleLongSide = s.blurSampleLongSide + d)
         }
-        rows += Row("Объём кэша", "место под скачанное", { megabytes(it.cacheBudgetBytes) }) { s, d ->
+        rows += Row("Кеш для фото", "копии снимков и лёгкие ролики", { megabytes(it.cacheBudgetBytes) }) { s, d ->
             s.copy(cacheBudgetBytes = s.cacheBudgetBytes + d * 64L * 1024 * 1024)
         }
         rows += Row("Порог кэширования", "тяжелее — потоком", { megabytes(it.cacheItemThresholdBytes) }) { s, d ->
@@ -324,7 +324,7 @@ class SetupActivity : Activity() {
             { if (it.videoMaxSizeBytes <= 0) "без ограничения" else "${it.videoMaxSizeBytes / 1_048_576} МБ" }) { s, d ->
             s.copy(videoMaxSizeBytes = (s.videoMaxSizeBytes + d * 128L * 1_048_576).coerceAtLeast(0L))
         }
-        rows += Row("Подкачка потока", "тяжёлому ролику заранее; 0 — нет",
+        rows += Row("Буфер для видео", "начало ролика из сети заранее; 0 — нет",
             { if (it.streamBufferBytes <= 0) "нет" else "${it.streamBufferBytes / 1_048_576} МБ" }) { s, d ->
             s.copy(streamBufferBytes = (s.streamBufferBytes + d * 128L * 1_048_576).coerceAtLeast(0L))
         }
