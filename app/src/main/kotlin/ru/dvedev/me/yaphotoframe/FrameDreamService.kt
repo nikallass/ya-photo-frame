@@ -359,9 +359,11 @@ class FrameDreamService : DreamService() {
         if (externalUuid == wanted && now - externalCheckedAt < EXTERNAL_CHECK_MILLIS) return externalCurrent
         externalCheckedAt = now
         val volume = runCatching { media.volume(wanted) }.getOrNull()
-        if (volume == null) {
+        val root = volume?.root
+        if (volume == null || root == null || !volume.usable) {
             if (externalCurrent != null || !externalMissingNoted) {
-                Diary.note("носитель $wanted не подключён — ролики тяжелее канала пропускаются")
+                val why = volume?.problem?.let { ": $it" } ?: " не подключён"
+                Diary.note("носитель ${volume?.label ?: wanted}$why — ролики тяжелее канала пропускаются")
                 externalMissingNoted = true
             }
             externalCurrent = null
@@ -371,19 +373,16 @@ class FrameDreamService : DreamService() {
         }
         externalVolume = volume
         if (externalCurrent == null || externalUuid != wanted) {
-            volume.root.mkdirs()
+            root.mkdirs()
             val cache = MediaCache(
-                directory = volume.root,
-                budgetBytes = MediaCache.reserveBudget(volume.root, { store.current.externalReserveBytes }),
+                directory = root,
+                budgetBytes = MediaCache.reserveBudget(root, { store.current.externalReserveBytes }),
             )
             cache.sweepLeftovers()
-            externalCurrent = ArchiveStore(cache, MediaFetcher(Http.client, cache), volume.root)
-            if (externalCurrent?.maxFileBytes() != Long.MAX_VALUE) {
-                Diary.note("носитель ${volume.label}: FAT32, файлы больше 4 ГБ на него не поедут")
-            }
+            externalCurrent = ArchiveStore(cache, MediaFetcher(Http.client, cache))
             externalUuid = wanted
             externalMissingNoted = false
-            Diary.note("носитель ${volume.label}: ${volume.root.path}")
+            Diary.note("носитель ${volume.label}: ${root.path}")
         }
         return externalCurrent
     }
@@ -394,8 +393,9 @@ class FrameDreamService : DreamService() {
         return "{\"chosen\":\"" + escape(store.current.externalStorageUuid) + "\",\"volumes\":" +
             volumes.joinToString(",", "[", "]") {
                 "{\"uuid\":\"" + escape(it.uuid) + "\",\"label\":\"" + escape(it.label) +
-                    "\",\"path\":\"" + escape(it.root.path) + "\",\"totalBytes\":" + it.totalBytes +
-                    ",\"freeBytes\":" + it.freeBytes + "}"
+                    "\",\"path\":\"" + escape(it.root?.path ?: "") + "\",\"totalBytes\":" + it.totalBytes +
+                    ",\"freeBytes\":" + it.freeBytes + ",\"usable\":" + it.usable +
+                    ",\"problem\":" + (it.problem?.let { p -> "\"" + escape(p) + "\"" } ?: "null") + "}"
             } + "}"
     }
 
@@ -409,6 +409,7 @@ class FrameDreamService : DreamService() {
             append("\"uuid\":\"").append(escape(chosen)).append("\",")
             append("\"present\":").append(current != null).append(',')
             append("\"label\":\"").append(escape(volume?.label ?: "")).append("\",")
+            append("\"problem\":").append(volume?.problem?.let { "\"" + escape(it) + "\"" } ?: "null").append(',')
             append("\"path\":\"").append(escape(volume?.root?.path ?: "")).append("\",")
             append("\"usedBytes\":").append(current?.usedBytes() ?: 0).append(',')
             append("\"freeBytes\":").append(current?.freeBytes() ?: 0).append(',')
@@ -1134,8 +1135,16 @@ class FrameDreamService : DreamService() {
                         "${"%.1f".format(speed)} МБ/с",
                 )
             }
-            is ArchiveEvent.Failed ->
-                Diary.problem("ролик ${event.item.name} не доехал до носителя: ${event.reason}")
+            is ArchiveEvent.Failed -> {
+                val tooLarge = event.reason.contains("too large", ignoreCase = true) ||
+                    event.reason.contains("EFBIG")
+                val why = if (tooLarge) {
+                    "файл больше, чем принимает носитель (FAT32 берёт до 4 ГБ — нужна exFAT или NTFS)"
+                } else {
+                    event.reason
+                }
+                Diary.problem("ролик ${event.item.name} не доехал до носителя: $why")
+            }
         }
     }
 

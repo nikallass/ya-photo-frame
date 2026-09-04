@@ -984,25 +984,6 @@ class FrameEngineTest {
         assertFalse("удалили на Диске — нет и на флешке", store.has("/огромное.mov"))
     }
 
-    @Test
-    fun `файл крупнее предела носителя не качается, а ждёт другого носителя`() = runTest {
-        switchToCacheFolder()
-        val store = object : ExternalStore by archive() {
-            override fun maxFileBytes() = 4L * 1024 * 1024 * 1024
-        }
-        val engine = library(
-            pageLimit = 50, includeVideo = true, channelBps = 50_000_000L,
-            prober = prober(6_000_000_000L to 100_000L), external = { store },
-        )
-        engine.sync()
-        engine.prefetch()
-        engine.awaitArchiving()
-
-        assertFalse("шесть гигабайт на FAT32 не поехали", store.has("/огромное.mov"))
-        assertEquals(1, engine.waitingForStorage())
-        assertTrue("огромное.mov" !in shown(engine, 12))
-    }
-
     /** Подставной буфер потока: помнит, сколько «подкачано», сети не трогает. */
     private class FakePrimer(private val fail: Boolean = false) : StreamPrimer {
         val primed = mutableMapOf<String, Long>()

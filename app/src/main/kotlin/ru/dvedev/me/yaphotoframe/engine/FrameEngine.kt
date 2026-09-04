@@ -169,6 +169,7 @@ class FrameEngine(
     private var archiveJob: Job? = null
     private var archiveJobPath: String? = null
     private var probeJob: Job? = null
+    private val archiveFailed = mutableSetOf<String>()
 
     @Volatile
     private var archiving: ArchiveState? = null
@@ -599,6 +600,7 @@ class FrameEngine(
             coroutineContext.ensureActive()
             val reason = e.message ?: e.javaClass.simpleName
             synchronized(failures) { failures[item.path] = reason }
+            synchronized(archiveLock) { archiveFailed += item.path }
             // Из очереди вон: иначе он держал бы место ожидающего до бесконечности.
             queueLock.withLock { queue.remove(item.path) }
             onArchive(ArchiveEvent.Failed(item, reason))
@@ -746,9 +748,11 @@ class FrameEngine(
             val shownBytes = item.sizeBytes * shownMillis / duration
             if (shownBytes <= primeBudgetBytes() - PRIME_HEADROOM_BYTES) return PlannedDelivery.Stream
         }
-        val store = external() ?: return PlannedDelivery.Skip
-        // Файл, который на носитель не ляжет, качать нельзя: узналось бы на четвёртом гигабайте.
-        return if (item.sizeBytes <= store.maxFileBytes()) PlannedDelivery.Archive else PlannedDelivery.Skip
+        if (external() == null) return PlannedDelivery.Skip
+        // Не доехавший до носителя (например, крупнее, чем принимает FAT32) второй
+        // раз до перезапуска не качается: узнавать это на четвёртом гигабайте дорого.
+        if (synchronized(archiveLock) { item.path in archiveFailed }) return PlannedDelivery.Skip
+        return PlannedDelivery.Archive
     }
 
     private suspend fun ensureCached(item: MediaItem): File =
@@ -937,9 +941,6 @@ interface ExternalStore {
 
     /** Освобождает место до запаса; возвращает, сколько файлов удалено. */
     fun evict(): Int
-
-    /** Крупнее какого файла носитель не примет: FAT32 не берёт больше 4 ГБ. */
-    fun maxFileBytes(): Long = Long.MAX_VALUE
 }
 
 /** Ход закачки на носитель. */

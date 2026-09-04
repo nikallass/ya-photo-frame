@@ -104,6 +104,8 @@
   .volume .box { width: 24px; flex: none; color: var(--muted); }
   .volume.on .box { color: var(--accent); }
   .volume small { color: var(--muted); display: block; }
+  .volume.bad { cursor: default; }
+  .volume.bad, .volume.bad small { color: var(--bad); }
   .empty { color: var(--muted); font-size: 13px; }
   .tree { font-size: 15px; }
   .treebar { display: flex; gap: 8px; margin-bottom: 10px; }
@@ -296,8 +298,8 @@ const FIELDS = [
     min: 0, max: 120, step: 1, get: v => Math.round(v / 60000), set: s => s * 60000,
     show: v => v ? Math.round(v / 60000) + ' мин' : 'пока не снимут' },
 
-  { key: 'videoMaxSizeBytes', name: 'Ролик не тяжелее', note: 'что тяжелее — не показывается вовсе: тяжёлый поток заикается, а пережатых вариантов Я.Диск не отдаёт; 0 — без ограничения',
-    min: 0, max: 4096, step: 64, get: v => Math.round(v / 1048576), set: s => s * 1048576,
+  { key: 'videoMaxSizeBytes', name: 'Ролик не тяжелее', note: 'что тяжелее — не показывается вовсе; 0 — без ограничения',
+    min: 0, max: 8192, step: 64, get: v => Math.round(v / 1048576), set: s => s * 1048576,
     show: v => !v ? 'без ограничения' : v >= 1073741824 ? (v / 1073741824).toFixed(1) + ' ГБ' : Math.round(v / 1048576) + ' МБ' },
 
   { key: 'streamBufferBytes', name: 'Подкачка потока', note: 'начало тяжёлого ролика подкачивается заранее в буфер этого объёма, и ролик выходит на экран, когда оно на месте; буфер общий и больше не растёт; 0 — не подкачивать',
@@ -495,16 +497,17 @@ function paintVolumes() {
   const box = document.getElementById('volumes');
   const chosen = state.externalStorageUuid || '';
   const rows = [{ uuid: '', label: 'Без носителя', note: 'тяжёлые ролики пропускаются' }]
-    .concat(volumes.map(v => ({ uuid: v.uuid, label: v.label + ' (' + v.uuid + ')',
-      note: gb(v.totalBytes) + ', свободно ' + gb(v.freeBytes) })));
+    .concat(volumes.map(v => ({ uuid: v.uuid, label: v.label + ' (' + v.uuid + ')', bad: !v.usable,
+      note: v.problem ? v.problem : gb(v.totalBytes) + ', свободно ' + gb(v.freeBytes) })));
   if (chosen && !volumes.some(v => v.uuid === chosen)) {
-    rows.push({ uuid: chosen, label: 'Флешка ' + chosen, note: 'не подключена' });
+    rows.push({ uuid: chosen, label: 'Флешка ' + chosen, note: 'не подключена', bad: true });
   }
   box.innerHTML = rows.map(r =>
-    '<div class="volume' + (r.uuid === chosen ? ' on' : '') + '" data-uuid="' + r.uuid.replace(/"/g, '') + '">' +
-    '<span class="box">' + (r.uuid === chosen ? '◉' : '○') + '</span>' +
+    '<div class="volume' + (r.uuid === chosen ? ' on' : '') + (r.bad ? ' bad' : '') +
+    '" data-uuid="' + r.uuid.replace(/"/g, '') + '">' +
+    '<span class="box">' + (r.bad ? '⚠' : r.uuid === chosen ? '◉' : '○') + '</span>' +
     '<span>' + escapeHtml(r.label) + '<small>' + escapeHtml(r.note) + '</small></span></div>').join('');
-  box.querySelectorAll('.volume').forEach(el => el.addEventListener('click', () => {
+  box.querySelectorAll('.volume:not(.bad)').forEach(el => el.addEventListener('click', () => {
     state.externalStorageUuid = el.dataset.uuid; paintVolumes(); schedule();
   }));
 }
@@ -920,7 +923,7 @@ async function loadState() {
     const ar = x.archiving;
     document.getElementById('external').innerHTML = !x.uuid
       ? kv('носитель', 'не выбран') + kv('ждут носителя', x.waiting || 0)
-      : kv('носитель', (x.label || x.uuid) + (x.present ? '' : ' — не подключён')) +
+      : kv('носитель', (x.label || x.uuid) + (x.present ? '' : ' — ' + (x.problem || 'не подключён'))) +
         (x.present ? kv('папка', x.path) + kv('занято', bytes(x.usedBytes)) + kv('свободно', bytes(x.freeBytes)) +
           kv('файлов', x.files) : '') + kv('ждут носителя', x.waiting || 0);
     document.getElementById('externalbar').style.width =

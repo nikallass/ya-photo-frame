@@ -63,12 +63,14 @@ class SetupActivity : Activity() {
     private fun describeVolume(uuid: String): String {
         if (uuid.isBlank()) return "нет"
         val volume = runCatching { media.volume(uuid) }.getOrNull() ?: return "$uuid — не подключён"
+        volume.problem?.let { return "${volume.label}: $it" }
         return "${volume.label} ${volume.uuid}, свободно ${volume.freeBytes / 1_073_741_824} ГБ"
     }
 
     /** Перебор по кругу: «нет» и все подключённые флешки. */
     private fun nextVolume(current: String, step: Int): String {
-        val options = listOf("") + runCatching { media.volumes() }.getOrDefault(emptyList()).map { it.uuid }
+        val options = listOf("") +
+            runCatching { media.volumes() }.getOrDefault(emptyList()).filter { it.usable }.map { it.uuid }
         val index = options.indexOf(current).coerceAtLeast(0)
         return options[Math.floorMod(index + step, options.size)]
     }
