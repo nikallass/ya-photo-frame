@@ -115,21 +115,33 @@
   .empty { color: var(--muted); font-size: 13px; }
   /* Текст в дереве не выделяется: тап по точке или квадратику на телефоне
      иначе вызывал панель «найти выделенное». */
-  .tree { font-size: 15px; overflow-x: auto; -webkit-user-select: none; user-select: none; }
+  /* Дерево шире карточки прокручивается свайпом: названия не режутся. Тело
+     дерева — колонка, растянутая до самой длинной строки, чтобы у всех строк
+     правый край был один и значок ссылки прилипал к нему. */
+  .tree { font-size: 15px; overflow-x: auto; -webkit-user-select: none; user-select: none;
+          margin: 0 -16px; }
+  .treebody { width: max-content; min-width: 100%; padding-left: 16px; }
   .treebar { display: flex; gap: 8px; margin-bottom: 10px; }
   .treebar .small { margin-top: 0; padding: 10px; font-size: 14px; }
-  .node { display: flex; align-items: center; gap: 10px; padding: 9px 2px; }
+  .node { display: flex; align-items: center; gap: 10px; padding: 9px 2px;
+          border-bottom: 1px solid rgba(255,255,255,.055); }
   .node .arrow { width: 22px; color: var(--muted); text-align: center; flex: none; cursor: pointer; }
   .node .arrow.leaf { cursor: default; }
   .node .box { width: 24px; flex: none; color: var(--muted); cursor: pointer; }
   /* Ссылка на папку в Я.Диске — еле заметный значок в конце строки; он не
      обрезается вместе с длинным названием. */
-  .node .open { flex: none; color: var(--muted); opacity: .45; text-decoration: none;
-                padding: 0 6px; font-size: 14px; }
-  .node .open:active { opacity: 1; }
+  /* Значок прилипает к правому краю видимой области; слева от него полоса
+     градиента, под которой длинное название растворяется в фоне карточки. */
+  .node .open { position: sticky; right: 0; z-index: 1; flex: none; text-decoration: none;
+                color: rgba(154,161,174,.45); font-size: 14px; padding: 9px 16px 9px 40px;
+                margin: -9px 0 -9px -40px;
+                background: linear-gradient(90deg, rgba(30,34,43,0), var(--card) 34px); }
+  .node .open:active { color: var(--accent); }
   .node.on > .box { color: var(--accent); }
   .node.inherited { color: var(--muted); }
-  .node .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Справа у подписи запас под значок: когда название помещается, градиент
+     ложится на пустое место, а не на буквы. */
+  .node .label { flex: 1 0 auto; white-space: nowrap; padding-right: 44px; }
   .node.holds > .label { color: var(--accent); }
   .node.holds > .label::before { content: '•'; margin-right: 6px; }
   .node .arrow, .node .box { gap: 6px; }
@@ -810,7 +822,10 @@ function updateApplyBar() {
 function drawTree() {
   const tree = document.getElementById('tree');
   tree.innerHTML = '';
-  tree.appendChild(nodeView('Вся директория', '/', 0, undefined));
+  const body = document.createElement('div');
+  body.className = 'treebody';
+  body.appendChild(nodeView('Вся директория', '/', 0, undefined));
+  tree.appendChild(body);
   updateApplyBar();
   status.textContent = selected.size
     ? 'отмечено папок: ' + selected.size
