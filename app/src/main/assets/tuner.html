@@ -113,21 +113,25 @@
   .volume.bad { cursor: default; }
   .volume.bad, .volume.bad small { color: var(--bad); }
   .empty { color: var(--muted); font-size: 13px; }
-  .tree { font-size: 15px; overflow-x: auto; }
+  /* Текст в дереве не выделяется: тап по точке или квадратику на телефоне
+     иначе вызывал панель «найти выделенное». */
+  .tree { font-size: 15px; overflow-x: auto; -webkit-user-select: none; user-select: none; }
   .treebar { display: flex; gap: 8px; margin-bottom: 10px; }
   .treebar .small { margin-top: 0; padding: 10px; font-size: 14px; }
   .node { display: flex; align-items: center; gap: 10px; padding: 9px 2px; }
-  .node .arrow { width: 22px; color: var(--muted); text-align: center; flex: none; cursor: pointer;
-                 padding: 4px 0; }
+  .node .arrow { width: 22px; color: var(--muted); text-align: center; flex: none; cursor: pointer; }
   .node .arrow.leaf { cursor: default; }
-  .node .box { width: 24px; flex: none; color: var(--muted); cursor: pointer; padding: 4px 0; }
+  .node .box { width: 24px; flex: none; color: var(--muted); cursor: pointer; }
+  /* Ссылка на папку в Я.Диске — еле заметный значок в конце строки; он не
+     обрезается вместе с длинным названием. */
+  .node .open { flex: none; color: var(--muted); opacity: .45; text-decoration: none;
+                padding: 0 6px; font-size: 14px; }
+  .node .open:active { opacity: 1; }
   .node.on > .box { color: var(--accent); }
   .node.inherited { color: var(--muted); }
-  .node .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-                 color: inherit; text-decoration: underline dotted var(--muted);
-                 text-underline-offset: 3px; }
+  .node .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .node.holds > .label { color: var(--accent); }
-  .node.holds > .label::before { content: '•'; margin-right: 6px; display: inline-block; text-decoration: none; }
+  .node.holds > .label::before { content: '•'; margin-right: 6px; }
   .node .arrow, .node .box { gap: 6px; }
   .node { gap: 6px; }
   .children { margin-left: 4px; border-left: 1px solid var(--line); padding-left: 5px; }
@@ -735,8 +739,8 @@ function showFolderAge() {
     : 'Дерево раскрывается по одному уровню, раз открытый уровень запоминается.';
 }
 
-// Три цели в строке: треугольник раскрывает, квадратик отмечает, название
-// открывает папку на Я.Диске. У папки без подпапок вместо треугольника точка —
+// Три цели в строке: треугольник раскрывает, квадратик отмечает, значок в
+// конце открывает папку на Я.Диске. У папки без подпапок вместо треугольника точка —
 // когда это известно (уровень разложен или телевизор знает число подпапок).
 function nodeView(name, path, depth, kidCount) {
   const wrap = document.createElement('div');
@@ -755,11 +759,13 @@ function nodeView(name, path, depth, kidCount) {
 
   row.innerHTML = '<span class="arrow' + (leaf ? ' leaf' : '') + '">' + arrow + '</span>' +
     '<span class="box">' + (checked ? '☑' : '☐') + '</span>' +
-    '<a class="label" target="_blank" rel="noopener"></a>';
+    '<span class="label"></span>' +
+    '<a class="open" target="_blank" rel="noopener" title="открыть на Я.Диске">↗</a>';
   const label = row.querySelector('.label');
   label.textContent = name;
-  label.title = 'открыть на Я.Диске';
-  label.href = path === '/' ? (state.folderUrl || '#') : diskLink(path);
+  label.title = name;
+  row.querySelector('.open').href = path === '/' ? (state.folderUrl || '#') : diskLink(path);
+  row.querySelector('.open').addEventListener('click', event => event.stopPropagation());
 
   if (!leaf) row.querySelector('.arrow').addEventListener('click', async event => {
     event.stopPropagation();

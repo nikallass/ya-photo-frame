@@ -45,6 +45,18 @@ class DriftPlanTest {
     }
 
     @Test
+    fun `до края остаётся отступ`() {
+        // Справа 540 px свободных; отступ 6 % ширины = 115 px, рост 0: ехать можно на 425.
+        val plan = DriftPlan.compute(
+            screenW, screenH, topLeft, directionX = 1f, directionY = 1f,
+            amplitude = 0.5f, zoom = 0f, durationMillis = 20_000L, edgeMargin = 0.06f,
+        )
+
+        assertEquals(540f - 1920 * 0.06f, plan.travelX, 1e-2f)
+        assertEquals(280f - 1080 * 0.06f, plan.travelY, 1e-2f)
+    }
+
+    @Test
     fun `влево и вверх сдвиги отрицательные`() {
         val bottomRight = DriftPlan.Box(540f, 280f, 1820f, 1000f)
 

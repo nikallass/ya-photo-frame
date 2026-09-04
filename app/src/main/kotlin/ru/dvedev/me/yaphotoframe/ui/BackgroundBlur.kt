@@ -23,13 +23,48 @@ object BackgroundBlur {
     /** До скольких пикселей по длинной стороне ужимать. Меньше — размытее. */
     const val DEFAULT_SAMPLE_LONG_SIDE = 32
 
-    /** До какого размера разворачивать обратно перед выводом на экран. */
-    private const val INTERMEDIATE_LONG_SIDE = 128
+    /**
+     * До какого размера разворачивать обратно перед выводом на экран.
+     *
+     * Было 128: остаток до 1920 добирал один билинейный апскейл в пятнадцать
+     * раз, и при слабом размытии на фоне проступала сетка мягких квадратов —
+     * каждый пиксель выборки виден как пятно с прямыми гранями. 512 оставляет
+     * экрану увеличение меньше чем вчетверо, и грани не читаются.
+     */
+    private const val INTERMEDIATE_LONG_SIDE = 512
 
     fun render(source: Bitmap, sampleLongSide: Int = DEFAULT_SAMPLE_LONG_SIDE): Bitmap {
         val target = sampleLongSide.coerceIn(2, 64)
         val tiny = downscaleByHalves(source, target)
-        return upscaleByDoubling(tiny, INTERMEDIATE_LONG_SIDE)
+        // Сгладить на малом размере: соседние выборки перестают быть ступенькой
+        // ещё до разворота, и удвоения дальше только растягивают плавный переход.
+        val soft = softened(tiny)
+        tiny.recycle()
+        return upscaleByDoubling(soft, INTERMEDIATE_LONG_SIDE)
+    }
+
+    /** Усреднение с соседями 3×3, два прохода — почти гауссово, на десятках пикселей это даром. */
+    private fun softened(source: Bitmap): Bitmap {
+        val w = source.width
+        val h = source.height
+        var pixels = IntArray(w * h).also { source.getPixels(it, 0, w, 0, 0, w, h) }
+        repeat(2) { pixels = boxPass(pixels, w, h) }
+        return Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
+    }
+
+    private fun boxPass(src: IntArray, w: Int, h: Int): IntArray {
+        val out = IntArray(w * h)
+        for (y in 0 until h) for (x in 0 until w) {
+            var r = 0; var g = 0; var b = 0; var n = 0
+            for (dy in -1..1) for (dx in -1..1) {
+                val xx = x + dx; val yy = y + dy
+                if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue
+                val p = src[yy * w + xx]
+                r += (p shr 16) and 0xff; g += (p shr 8) and 0xff; b += p and 0xff; n++
+            }
+            out[y * w + x] = (0xff shl 24) or ((r / n) shl 16) or ((g / n) shl 8) or (b / n)
+        }
+        return out
     }
 
     private fun downscaleByHalves(source: Bitmap, targetLongSide: Int): Bitmap {

@@ -35,6 +35,8 @@ object DriftPlan {
      * @param directionX +1 — вправо, −1 — влево; [directionY] так же вниз/вверх.
      * @param amplitude путь долей от ширины экрана.
      * @param zoom на сколько вырасти за показ, долей от своего размера.
+     * @param edgeMargin ближе этой доли стороны экрана к краю кадр не подходит —
+     *   ни в начале, ни в конце пути, вместе с ростом.
      */
     fun compute(
         width: Int,
@@ -45,14 +47,18 @@ object DriftPlan {
         amplitude: Float,
         zoom: Float,
         durationMillis: Long,
+        edgeMargin: Float = 0f,
     ): Plan {
         val growth = zoom.coerceAtLeast(0f)
         // Приближение раздвигает кадр на половину прироста в каждую сторону —
-        // столько же надо оставить до края.
+        // столько же надо оставить до края. И ещё отступ: раньше кадр доезжал
+        // до самой кромки экрана, потому что путь считался до края, а не до отступа.
         val growX = (bounds.right - bounds.left) * growth / 2
         val growY = (bounds.bottom - bounds.top) * growth / 2
-        val roomX = (if (directionX > 0) width - bounds.right else bounds.left) - growX
-        val roomY = (if (directionY > 0) height - bounds.bottom else bounds.top) - growY
+        val marginX = width * edgeMargin.coerceAtLeast(0f)
+        val marginY = height * edgeMargin.coerceAtLeast(0f)
+        val roomX = (if (directionX > 0) width - bounds.right else bounds.left) - growX - marginX
+        val roomY = (if (directionY > 0) height - bounds.bottom else bounds.top) - growY - marginY
 
         val wanted = width * amplitude.coerceAtLeast(0f)
         val travelX = min(wanted, roomX.coerceAtLeast(0f))

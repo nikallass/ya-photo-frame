@@ -130,6 +130,7 @@ class FrameLayer(context: Context) : FrameLayout(context) {
             amplitude = settings.driftAmplitude,
             zoom = settings.zoomAmount,
             durationMillis = durationMillis,
+            edgeMargin = settings.edgeMargin,
         )
 
         val startX = if (fromCurrentPosition) offsetX() else 0f
