@@ -28,6 +28,17 @@ object DriftPlan {
         val durationMillis: Long,
     )
 
+    /**
+     * Сколько проехать по одной оси и куда: [toward] — место в положительную
+     * сторону, [back] — в отрицательную. Возвращает знак направления и длину.
+     */
+    private fun travel(wanted: Float, direction: Float, toward: Float, back: Float): Pair<Float, Float> {
+        val ahead = (if (direction > 0) toward else back).coerceAtLeast(0f)
+        val behind = (if (direction > 0) back else toward).coerceAtLeast(0f)
+        return if (ahead < wanted && behind > ahead) Pair(-direction, min(wanted, behind))
+        else Pair(direction, min(wanted, ahead))
+    }
+
     /** Короче двух десятых секунды ход не бывает: иначе это рывок, а не движение. */
     const val MIN_DURATION_MILLIS = 200L
 
@@ -57,16 +68,25 @@ object DriftPlan {
         val growY = (bounds.bottom - bounds.top) * growth / 2
         val marginX = width * edgeMargin.coerceAtLeast(0f)
         val marginY = height * edgeMargin.coerceAtLeast(0f)
-        val roomX = (if (directionX > 0) width - bounds.right else bounds.left) - growX - marginX
-        val roomY = (if (directionY > 0) height - bounds.bottom else bounds.top) - growY - marginY
-
         val wanted = width * amplitude.coerceAtLeast(0f)
-        val travelX = min(wanted, roomX.coerceAtLeast(0f))
-        val travelY = min(wanted, roomY.coerceAtLeast(0f))
+        // Места в выбранную сторону не хватает — ехать в другую, если там его
+        // больше: у прижатого к отступу кадра дорога только к середине.
+        val (dirX, travelX) = travel(
+            wanted,
+            directionX,
+            toward = width - bounds.right - growX - marginX,
+            back = bounds.left - growX - marginX,
+        )
+        val (dirY, travelY) = travel(
+            wanted,
+            directionY,
+            toward = height - bounds.bottom - growY - marginY,
+            back = bounds.top - growY - marginY,
+        )
 
         return Plan(
-            travelX = travelX * directionX,
-            travelY = travelY * directionY,
+            travelX = travelX * dirX,
+            travelY = travelY * dirY,
             toScale = 1f + growth,
             durationMillis = durationMillis.coerceAtLeast(MIN_DURATION_MILLIS),
         )

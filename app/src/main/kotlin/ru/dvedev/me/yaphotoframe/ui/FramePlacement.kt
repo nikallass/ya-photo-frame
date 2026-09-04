@@ -9,19 +9,22 @@ package ru.dvedev.me.yaphotoframe.ui
  * близко к краю. Для почти полноэкранного снимка сдвиг сам собой выйдет
  * небольшим, для маленького — заметным.
  */
-data class FramePlacement(val horizontal: Float, val vertical: Float) {
+data class FramePlacement(
+    val horizontal: Float,
+    val vertical: Float,
+    /** Куда ехать: +1 вправо/вниз, −1 влево/вверх. */
+    val driftX: Float = if (horizontal < 0.5f) 1f else -1f,
+    val driftY: Float = if (vertical < 0.5f) 1f else -1f,
+) {
 
     /**
      * Куда дрейфовать кадру: по единице в каждую сторону.
      *
-     * Направление берётся от размещения — кадр всегда уползает к середине
-     * экрана, а не к ближнему краю. Так дрейф никогда не борется с отступом,
-     * который его же и ограничивает.
+     * Направление случайное, от ключа кадра: раньше кадр всегда уползал к
+     * середине и за показ съедал всё смещение к золотому сечению. Если в
+     * выбранную сторону места нет, [DriftPlan] развернёт ход.
      */
-    fun driftDirection(): Pair<Float, Float> = Pair(
-        if (horizontal < 0.5f) 1f else -1f,
-        if (vertical < 0.5f) 1f else -1f,
-    )
+    fun driftDirection(): Pair<Float, Float> = Pair(driftX, driftY)
 
     companion object {
         private const val NEAR = 0.382f
@@ -38,6 +41,8 @@ data class FramePlacement(val horizontal: Float, val vertical: Float) {
             return FramePlacement(
                 horizontal = if (hash and 1 == 0) NEAR else FAR,
                 vertical = if (hash and 2 == 0) NEAR else FAR,
+                driftX = if (hash and 4 == 0) 1f else -1f,
+                driftY = if (hash and 8 == 0) 1f else -1f,
             )
         }
     }

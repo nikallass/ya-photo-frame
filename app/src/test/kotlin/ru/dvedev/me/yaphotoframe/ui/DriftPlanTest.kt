@@ -39,7 +39,8 @@ class DriftPlanTest {
             amplitude = 0.10f, zoom = 0.10f, durationMillis = 20_000L,
         )
 
-        assertEquals(0f, plan.travelX, 1e-6f)
+        // Вправо места нет — ход разворачивается влево, там свободно 600 − 64.
+        assertEquals(-192f, plan.travelX, 1e-3f)
         // Вниз свободно 280 px минус 36 на рост — заданные 192 помещаются целиком.
         assertEquals(192f, plan.travelY, 1e-3f)
     }
@@ -101,5 +102,32 @@ class DriftPlanTest {
 
         assertEquals(0f, plan.travelX, 1e-6f)
         assertEquals(1f, plan.toScale, 1e-6f)
+    }
+
+    @Test
+    fun `нет места в выбранную сторону — ход разворачивается к свободной`() {
+        // Кадр прижат к левому отступу; просили ехать влево — поедет вправо.
+        val atLeft = DriftPlan.Box(115f, 80f, 1395f, 800f)
+
+        val plan = DriftPlan.compute(
+            screenW, screenH, atLeft, directionX = -1f, directionY = 1f,
+            amplitude = 0.06f, zoom = 0f, durationMillis = 20_000L, edgeMargin = 0.06f,
+        )
+
+        assertEquals(1920 * 0.06f, plan.travelX, 1e-2f)
+    }
+
+    @Test
+    fun `место есть в обе стороны — едет куда сказано`() {
+        val middle = DriftPlan.Box(320f, 114f, 1600f, 967f)
+
+        val plan = DriftPlan.compute(
+            screenW, screenH, middle, directionX = -1f, directionY = -1f,
+            amplitude = 0.03f, zoom = 0f, durationMillis = 20_000L, edgeMargin = 0.06f,
+        )
+
+        assertEquals(-(1920 * 0.03f), plan.travelX, 1e-2f)
+        // Вверх свободно 114 px минус отступ 6 % высоты: столько и проедет, дальше отступ.
+        assertEquals(-(114f - 1080 * 0.06f), plan.travelY, 1e-2f)
     }
 }
