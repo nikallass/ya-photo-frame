@@ -45,7 +45,7 @@ import ru.dvedev.me.yaphotoframe.video.StreamHead
 import ru.dvedev.me.yaphotoframe.video.ExoStreamPrimer
 import ru.dvedev.me.yaphotoframe.video.StreamCache
 import ru.dvedev.me.yaphotoframe.video.VideoPlayback
-import ru.dvedev.me.yaphotoframe.ui.FramePlacement
+import ru.dvedev.me.yaphotoframe.ui.FramePlan
 import ru.dvedev.me.yaphotoframe.ui.GuideView
 import ru.dvedev.me.yaphotoframe.ui.SlideshowView
 import java.io.File
@@ -863,7 +863,8 @@ class FrameDreamService : DreamService() {
         }
         view.show(
             prepared = prepared,
-            placement = FramePlacement.goldenFor(prepared.item.path),
+            // Ключ с временем прошлого показа: каждый раз снимок встаёт иначе.
+            key = FramePlan.showKey(prepared.item.path, engine?.lastShownAtMillis(prepared.item.path)),
             settings = store.current,
             animate = animate,
         )
@@ -936,7 +937,7 @@ class FrameDreamService : DreamService() {
                 slideshow?.page(1)
             },
             onSizeKnown = { width, height ->
-                slideshowView?.fitVideo(width, height, store.current.frameInset)
+                slideshowView?.fitVideo(width, height, store.current.insetFor(width, height))
             },
             onPlaying = {
                 slideshowView?.hideVideoPoster()

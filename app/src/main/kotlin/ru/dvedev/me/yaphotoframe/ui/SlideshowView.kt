@@ -63,7 +63,7 @@ class SlideshowView(context: Context) : FrameLayout(context) {
 
     fun show(
         prepared: PreparedItem,
-        placement: FramePlacement,
+        key: String,
         settings: FrameSettings,
         animate: Boolean,
     ) {
@@ -74,7 +74,7 @@ class SlideshowView(context: Context) : FrameLayout(context) {
                     frame = prepared.frame,
                     background = prepared.background,
                     companion = prepared.companion,
-                    placement = placement,
+                    key = key,
                     settings = settings,
                     dateText = dateFor(settings, prepared.item.takenAtMillis),
                     companionDateText = dateFor(settings, prepared.companionItem?.takenAtMillis),

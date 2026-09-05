@@ -84,7 +84,7 @@ class VideoLayer(context: Context) : FrameLayout(context) {
 
         // До того как плеер сообщит размер, постер занимает то же место, что
         // займёт картинка: он и показывает пропорции ролика.
-        fitVideo(poster.width, poster.height, settings.frameInset)
+        fitVideo(poster.width, poster.height, settings.insetFor(poster.width, poster.height))
     }
 
     /** Плеер отрисовал первый кадр — постер больше не нужен. */

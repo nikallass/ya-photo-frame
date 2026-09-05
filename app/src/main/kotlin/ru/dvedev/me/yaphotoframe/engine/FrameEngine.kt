@@ -227,6 +227,9 @@ class FrameEngine(
         }
     }
 
+    /** Когда снимок показывали в последний раз; null — ещё ни разу. */
+    fun lastShownAtMillis(path: String): Long? = entryOf(path)?.lastShownAtMillis
+
     /** Битрейт ролика, если длительность уже измерена. */
     fun bitrateOf(path: String): Long? = entryOf(path)?.bitrateBps
 

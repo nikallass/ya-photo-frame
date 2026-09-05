@@ -300,8 +300,11 @@ class SetupActivity : Activity() {
         "zoomAmount" to Editor({ if (it.zoomAmount <= 0f) "нет" else percent(it.zoomAmount) }) { s, d ->
             s.copy(zoomAmount = s.zoomAmount + d * 0.01f)
         },
-        "frameInset" to Editor({ percent(it.frameInset) }) { s, d ->
-            s.copy(frameInset = s.frameInset + d * 0.01f)
+        "frameInsetLandscape" to Editor({ percent(it.frameInsetLandscape) }) { s, d ->
+            s.copy(frameInsetLandscape = s.frameInsetLandscape + d * 0.01f)
+        },
+        "frameInsetPortrait" to Editor({ percent(it.frameInsetPortrait) }) { s, d ->
+            s.copy(frameInsetPortrait = s.frameInsetPortrait + d * 0.01f)
         },
         "placementStrength" to Editor({ percent(it.placementStrength) }) { s, d ->
             s.copy(placementStrength = s.placementStrength + d * 0.05f)

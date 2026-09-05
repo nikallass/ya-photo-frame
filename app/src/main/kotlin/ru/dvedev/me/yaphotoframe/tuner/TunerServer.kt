@@ -302,7 +302,10 @@ class TunerServer(
                 driftAmplitude = values["driftAmplitude"]?.toFloatOrNull()
                     ?: current.driftAmplitude,
                 zoomAmount = values["zoomAmount"]?.toFloatOrNull() ?: current.zoomAmount,
-                frameInset = values["frameInset"]?.toFloatOrNull() ?: current.frameInset,
+                frameInsetLandscape = (values["frameInsetLandscape"] ?: values["frameInset"])?.toFloatOrNull()
+                    ?: current.frameInsetLandscape,
+                frameInsetPortrait = values["frameInsetPortrait"]?.toFloatOrNull()
+                    ?: current.frameInsetPortrait,
                 edgeMargin = values["edgeMargin"]?.toFloatOrNull() ?: current.edgeMargin,
                 placementStrength = values["placementStrength"]?.toFloatOrNull()
                     ?: current.placementStrength,

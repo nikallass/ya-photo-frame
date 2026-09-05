@@ -53,7 +53,10 @@ class SettingsReceiver : BroadcastReceiver() {
             "crossfadeMillis" -> raw.toLongOrNull()?.let { settings.copy(crossfadeMillis = it) }
             "driftAmplitude" -> raw.toFloatOrNull()?.let { settings.copy(driftAmplitude = it) }
             "zoomAmount" -> raw.toFloatOrNull()?.let { settings.copy(zoomAmount = it) }
-            "frameInset" -> raw.toFloatOrNull()?.let { settings.copy(frameInset = it) }
+            // Старое имя принимается как размер горизонтальных.
+            "frameInset", "frameInsetLandscape" ->
+                raw.toFloatOrNull()?.let { settings.copy(frameInsetLandscape = it) }
+            "frameInsetPortrait" -> raw.toFloatOrNull()?.let { settings.copy(frameInsetPortrait = it) }
             "edgeMargin" -> raw.toFloatOrNull()?.let { settings.copy(edgeMargin = it) }
             "placementStrength" -> raw.toFloatOrNull()?.let { settings.copy(placementStrength = it) }
             "backgroundDim" -> raw.toFloatOrNull()?.let { settings.copy(backgroundDim = it) }

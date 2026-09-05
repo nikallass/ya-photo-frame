@@ -10,7 +10,6 @@ import android.os.Handler
 import android.os.Looper
 import android.widget.FrameLayout
 import android.widget.ImageView
-import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
@@ -39,7 +38,8 @@ class FrameLayer(context: Context) : FrameLayout(context) {
     private var frameBitmap: Bitmap? = null
     private var companionBitmap: Bitmap? = null
     private var backgroundBitmap: Bitmap? = null
-    private var placement: FramePlacement = FramePlacement.CENTER
+    private var key: String = ""
+    private var plan: FramePlan.Plan? = null
     private var settings: FrameSettings = FrameSettings()
 
     private fun imageView() = ImageView(context).apply {
@@ -64,7 +64,7 @@ class FrameLayer(context: Context) : FrameLayout(context) {
         frame: Bitmap,
         background: Bitmap,
         companion: Bitmap?,
-        placement: FramePlacement,
+        key: String,
         settings: FrameSettings,
         dateText: String?,
         companionDateText: String?,
@@ -73,7 +73,7 @@ class FrameLayer(context: Context) : FrameLayout(context) {
         frameBitmap = frame
         companionBitmap = companion
         backgroundBitmap = background
-        this.placement = placement
+        this.key = key
         this.settings = settings
 
         backgroundView.setImageBitmap(background)
@@ -105,46 +105,24 @@ class FrameLayer(context: Context) : FrameLayout(context) {
     private fun currentScale() = scaleX * pairHolder.scaleX
 
     /**
-     * Пускает кадр в медленный дрейф.
-     *
-     * Ход не симметричный: кадр стартует там, где его поставило размещение, и
-     * уезжает в ту сторону, где до края дальше. Симметричный размах требовал бы
-     * свободного места с обеих сторон, а смещение по золотому сечению одну
-     * сторону как раз поджимает — в итоге заданная длина обрезалась вдвое.
-     *
-     * Ход и рост занимают всё [durationMillis]: кадр доходит до заданного пути
-     * и роста ровно к смене. Расчёт целей — в [DriftPlan].
+     * Пускает кадр в медленный дрейф по плану из [FramePlan]: цели уже
+     * посчитаны при размещении, здесь только время. Ход и рост занимают всё
+     * [durationMillis]: кадр доходит до цели ровно к смене.
      */
     fun startDrift(durationMillis: Long, fromCurrentPosition: Boolean = false) {
-        val bounds = contentBounds() ?: return
-        val direction = placement.driftDirection()
-        val plan = DriftPlan.compute(
-            width = width,
-            height = height,
-            bounds = DriftPlan.Box(
-                bounds.left.toFloat(), bounds.top.toFloat(),
-                bounds.right.toFloat(), bounds.bottom.toFloat(),
-            ),
-            directionX = direction.first,
-            directionY = direction.second,
-            amplitude = settings.driftAmplitude,
-            zoom = settings.zoomAmount,
-            durationMillis = durationMillis,
-            edgeMargin = settings.edgeMargin,
-        )
-
+        val plan = plan ?: return
         val startX = if (fromCurrentPosition) offsetX() else 0f
         val startY = if (fromCurrentPosition) offsetY() else 0f
         val startScale = if (fromCurrentPosition) currentScale() else 1f
         stopDrift()
-        // Растёт кадр вокруг своей середины, а не вокруг угла экрана.
-        val pivotX = (bounds.left + bounds.right) / 2f
-        val pivotY = (bounds.top + bounds.bottom) / 2f
+        // Растёт ряд вокруг своей середины, а не вокруг угла экрана.
+        val pivotX = plan.left + plan.drawnWidth / 2f
+        val pivotY = plan.top + plan.drawnHeight / 2f
         pairHolder.pivotX = pivotX; pairHolder.pivotY = pivotY
         this.pivotX = pivotX; this.pivotY = pivotY
         drift = Drift(
             startedAt = SystemClock.elapsedRealtime(),
-            durationMillis = plan.durationMillis,
+            durationMillis = durationMillis.coerceAtLeast(FramePlan.MIN_DURATION_MILLIS),
             fromX = startX,
             fromY = startY,
             toX = plan.travelX,
@@ -270,22 +248,6 @@ class FrameLayer(context: Context) : FrameLayout(context) {
         applyPlacement()
     }
 
-    private class Bounds(val left: Int, val top: Int, val right: Int, val bottom: Int)
-
-    private fun contentBounds(): Bounds? {
-        val first = frameView.layoutParams as LayoutParams
-        if (first.width == 0) return null
-        val second = companionView.layoutParams as LayoutParams
-        val right = if (companionBitmap == null) first.leftMargin + first.width
-        else second.leftMargin + second.width
-        return Bounds(
-            left = first.leftMargin,
-            top = first.topMargin,
-            right = right,
-            bottom = first.topMargin + first.height,
-        )
-    }
-
     private fun applyPlacement() {
         val frame = frameBitmap ?: return
         if (width == 0 || height == 0) return
@@ -295,22 +257,25 @@ class FrameLayer(context: Context) : FrameLayout(context) {
         val naturalWidth = frame.width + (companion?.width ?: 0) + gap
         val naturalHeight = maxOf(frame.height, companion?.height ?: 0)
 
-        // Уменьшаем, только если не помещается. Увеличивать нельзя никогда:
-        // хранилище отдаёт максимум 1280 по длинной стороне, и растягивание до
-        // ширины экрана дало бы мыло.
-        val scale = min(
-            1f,
-            min(
-                width * settings.frameInset / naturalWidth,
-                height * settings.frameInset / naturalHeight,
+        // Размещение, путь и рост — из плана: там же гарантия, что ряд не
+        // пересечёт отступ ни в начале, ни в конце показа.
+        val plan = FramePlan.compute(
+            FramePlan.Input(
+                width = width,
+                height = height,
+                naturalWidth = naturalWidth,
+                naturalHeight = naturalHeight,
+                portrait = companion != null || frame.height > frame.width,
+                key = key,
+                settings = settings,
+                durationMillis = settings.showDurationMillis + settings.crossfadeMillis,
             ),
         )
-        val drawnWidth = (naturalWidth * scale).roundToInt()
-        val drawnHeight = (naturalHeight * scale).roundToInt()
-        val left = (centerAlong(placement.horizontal, width, drawnWidth) - drawnWidth / 2f)
-            .roundToInt()
-        val top = (centerAlong(placement.vertical, height, drawnHeight) - drawnHeight / 2f)
-            .roundToInt()
+        this.plan = plan
+        val scale = plan.scale
+        val left = plan.left
+        val top = plan.top
+        val drawnHeight = plan.drawnHeight
 
         val firstWidth = (frame.width * scale).roundToInt()
         val firstHeight = (frame.height * scale).roundToInt()
@@ -354,22 +319,6 @@ class FrameLayer(context: Context) : FrameLayout(context) {
         params.leftMargin = left
         params.topMargin = top + (rowHeight - height) / 2
         view.layoutParams = params
-    }
-
-    /**
-     * Куда попадёт середина кадра вдоль одной оси.
-     *
-     * Точка золотого сечения — лишь пожелание: кадр прижимается обратно, чтобы
-     * между ним и краем остался отступ. Когда свободного места нет вовсе, оба
-     * ограничения сходятся в середину, и кадр встаёт по центру.
-     */
-    private fun centerAlong(bias: Float, available: Int, drawn: Int): Float {
-        val margin = available * settings.edgeMargin
-        val minCenter = margin + drawn / 2f
-        val maxCenter = available - margin - drawn / 2f
-        val middle = available / 2f
-        val desired = middle + (bias - 0.5f) * available * settings.placementStrength
-        return if (minCenter > maxCenter) middle else desired.coerceIn(minCenter, maxCenter)
     }
 
     private fun recycleBitmaps() {

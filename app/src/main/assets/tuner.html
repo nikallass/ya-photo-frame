@@ -344,7 +344,10 @@ const SLIDERS = {
   zoomAmount: { min: 0, max: 30, step: 1, get: v => Math.round(v * 100), set: s => s / 100,
     show: v => v ? Math.round(v * 100) + ' %' : 'нет' },
 
-  frameInset: { min: 30, max: 100, step: 1, get: v => Math.round(v * 100), set: s => s / 100,
+  frameInsetLandscape: { min: 30, max: 100, step: 1, get: v => Math.round(v * 100), set: s => s / 100,
+    show: v => Math.round(v * 100) + ' %' },
+
+  frameInsetPortrait: { min: 30, max: 100, step: 1, get: v => Math.round(v * 100), set: s => s / 100,
     show: v => Math.round(v * 100) + ' %' },
 
   placementStrength: { min: 0, max: 100, step: 5, get: v => Math.round(v * 100), set: s => s / 100,

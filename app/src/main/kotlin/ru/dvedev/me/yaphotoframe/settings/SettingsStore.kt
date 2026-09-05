@@ -67,7 +67,13 @@ class SettingsStore(context: Context) {
             crossfadeMillis = prefs.getLong(KEY_CROSSFADE, defaults.crossfadeMillis),
             driftAmplitude = prefs.getFloat(KEY_DRIFT, defaults.driftAmplitude),
             zoomAmount = prefs.getFloat(KEY_ZOOM, defaults.zoomAmount),
-            frameInset = prefs.getFloat(KEY_INSET, defaults.frameInset),
+            // Старый единый размер кадра переезжает в размер горизонтальных,
+            // чтобы обновление ничего не сбросило.
+            frameInsetLandscape = prefs.getFloat(
+                KEY_INSET_LANDSCAPE,
+                prefs.getFloat(KEY_INSET, defaults.frameInsetLandscape),
+            ),
+            frameInsetPortrait = prefs.getFloat(KEY_INSET_PORTRAIT, defaults.frameInsetPortrait),
             edgeMargin = prefs.getFloat(KEY_MARGIN, defaults.edgeMargin),
             placementStrength = prefs.getFloat(KEY_PLACEMENT, defaults.placementStrength),
             backgroundDim = prefs.getFloat(KEY_DIM, defaults.backgroundDim),
@@ -118,7 +124,8 @@ class SettingsStore(context: Context) {
             .putLong(KEY_CROSSFADE, value.crossfadeMillis)
             .putFloat(KEY_DRIFT, value.driftAmplitude)
             .putFloat(KEY_ZOOM, value.zoomAmount)
-            .putFloat(KEY_INSET, value.frameInset)
+            .putFloat(KEY_INSET_LANDSCAPE, value.frameInsetLandscape)
+            .putFloat(KEY_INSET_PORTRAIT, value.frameInsetPortrait)
             .putFloat(KEY_MARGIN, value.edgeMargin)
             .putFloat(KEY_PLACEMENT, value.placementStrength)
             .putFloat(KEY_DIM, value.backgroundDim)
@@ -155,6 +162,8 @@ class SettingsStore(context: Context) {
         const val KEY_DRIFT = "drift_amplitude"
         const val KEY_ZOOM = "zoom_amount"
         const val KEY_INSET = "frame_inset"
+        const val KEY_INSET_LANDSCAPE = "frame_inset_landscape"
+        const val KEY_INSET_PORTRAIT = "frame_inset_portrait"
         const val KEY_MARGIN = "edge_margin"
         const val KEY_PLACEMENT = "placement_strength"
         const val KEY_DIM = "background_dim"
@@ -207,7 +216,8 @@ fun FrameSettings.sanitized(): FrameSettings {
         crossfadeMillis = crossfadeMillis.coerceIn(0L, 10_000L),
         driftAmplitude = driftAmplitude.coerceIn(0f, 0.30f),
         zoomAmount = zoomAmount.coerceIn(0f, 0.30f),
-        frameInset = frameInset.coerceIn(0.3f, 1f),
+        frameInsetLandscape = frameInsetLandscape.coerceIn(0.3f, 1f),
+        frameInsetPortrait = frameInsetPortrait.coerceIn(0.3f, 1f),
         edgeMargin = edgeMargin.coerceIn(0f, 0.25f),
         placementStrength = placementStrength.coerceIn(0f, 1f),
         backgroundDim = backgroundDim.coerceIn(0f, 1f),
