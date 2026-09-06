@@ -105,6 +105,9 @@ class FrameDreamService : DreamService() {
     /** Идёт ли сейчас ролик — от этого зависит, сколько держать кадр. */
     private var showingVideo = false
 
+    /** Что сейчас на экране — чтобы отложенная проверка кадра не била по следующему ролику. */
+    private var currentItemPath: String? = null
+
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
 
@@ -870,6 +873,7 @@ class FrameDreamService : DreamService() {
         )
 
         showingVideo = prepared is PreparedVideo
+        currentItemPath = prepared.item.path
         if (!showingVideo) overlay(showingSound = false)
         // Пока ролик на экране: подкачка потока ждёт, если ролик сам идёт
         // потоком (они делят сеть); всё остальное — по настройке «Закачки во
@@ -901,6 +905,24 @@ class FrameDreamService : DreamService() {
                 if (outcome.fetched > 0 || outcome.evicted > 0) reportPrefetch(outcome)
             }
         }
+    }
+
+    /** Снимок с поверхности ролика: если он зелёно-пурпурными полосами, ролик вон. */
+    private fun checkFrame(prepared: PreparedVideo) {
+        val view = slideshowView ?: return
+        if (currentItemPath != prepared.item.path) return
+        val bitmap = runCatching { view.videoSurface.getBitmap(160, 90) }.getOrNull() ?: return
+        val pixels = IntArray(bitmap.width * bitmap.height)
+        bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+        bitmap.recycle()
+        val share = ru.dvedev.me.yaphotoframe.video.FrameCorruption.garbageShare(pixels)
+        if (share < ru.dvedev.me.yaphotoframe.video.FrameCorruption.THRESHOLD) return
+        Diary.problem(
+            "телевизор не декодирует ${prepared.item.name}: кадр полосами (${(share * 100).toInt()} % мусора) — ролик больше не показывается",
+        )
+        playback.stop()
+        scope.launch { engine?.markUndecodable(prepared.item.path) }
+        slideshow?.page(1)
     }
 
     private fun startPlayback(prepared: PreparedVideo) {
@@ -941,6 +963,11 @@ class FrameDreamService : DreamService() {
             },
             onPlaying = {
                 slideshowView?.hideVideoPoster()
+                // Декодер может не упасть, а рисовать мусор: через полторы и
+                // четыре секунды заглядываем в кадр.
+                for (delay in listOf(1_500L, 4_000L)) {
+                    slideshowView?.postDelayed({ checkFrame(prepared) }, delay)
+                }
                 // Длительность — в дневник: ролик с фотоаппарата на десять
                 // секунд весит как фильм, и без неё кажется, что он оборвался.
                 val seconds = playback.durationMillis() / 1000
@@ -976,6 +1003,7 @@ class FrameDreamService : DreamService() {
                 diagnostics = ::diagnostics,
                 folders = ::foldersJson,
                 storage = ::storageJson,
+                hasVolume = { uuid -> runCatching { media.volumes() }.getOrDefault(emptyList()).any { it.uuid == uuid } },
                 onRescanFolders = {
                     scope.launch {
                         rescanningFolders = true

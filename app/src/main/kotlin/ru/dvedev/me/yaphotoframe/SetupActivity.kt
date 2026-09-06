@@ -117,6 +117,7 @@ class SetupActivity : Activity() {
                 diagnostics = ::diagnostics,
                 folders = ::foldersJson,
                 onRescanFolders = ::rescanFolders,
+                hasVolume = { uuid -> runCatching { media.volumes() }.getOrDefault(emptyList()).any { it.uuid == uuid } },
             ).also { it.start() }
         }
 

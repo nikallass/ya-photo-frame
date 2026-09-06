@@ -53,8 +53,10 @@ class TunerServer(
      * и подсказывать надо другое.
      */
     private val host: String = "dream",
-    /** Тома под флешка — страница показывает их списком. */
+    /** Тома под флешку — страница показывает их списком. */
     private val storage: () -> String = { "{\"volumes\":[]}" },
+    /** Есть ли том с таким UUID на этом телевизоре — для переноса настроек. */
+    private val hasVolume: (String) -> Boolean = { true },
 ) {
 
     private var serverSocket: ServerSocket? = null
@@ -267,17 +269,25 @@ class TunerServer(
         } catch (e: Exception) {
             return "это не JSON настроек"
         }
-        val pairs = fields.mapNotNull { (key, value) ->
+        val values = fields.mapNotNull { (key, value) ->
             if (key == "host" || key == "version") return@mapNotNull null
             val raw = when (value) {
                 is JsonArray -> value.joinToString("\n") { (it as? JsonPrimitive)?.content ?: "" }
                 is JsonPrimitive -> value.content
                 else -> return@mapNotNull null
             }
-            key + "=" + java.net.URLEncoder.encode(raw, StandardCharsets.UTF_8.name())
+            key to raw
+        }.toMap()
+        if ("folderUrl" !in values) return "в файле нет настроек рамки"
+        val filtered = ImportFilter.filter(values, hasVolume)
+        if (filtered.size != values.size) {
+            ru.dvedev.me.yaphotoframe.diag.Diary.note(
+                "перенос настроек: флешки ${values[ImportFilter.VOLUME_KEY]} на этом телевизоре нет, выбор тома оставлен прежним",
+            )
         }
-        if (pairs.none { it.startsWith("folderUrl=") }) return "в файле нет настроек рамки"
-        apply(pairs.joinToString("&"))
+        apply(filtered.entries.joinToString("&") { (key, raw) ->
+            key + "=" + java.net.URLEncoder.encode(raw, StandardCharsets.UTF_8.name())
+        })
         return null
     }
 
