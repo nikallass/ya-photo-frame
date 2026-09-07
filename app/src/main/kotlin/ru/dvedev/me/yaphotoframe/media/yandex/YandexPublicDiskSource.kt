@@ -52,6 +52,10 @@ class YandexPublicDiskSource(
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    @Volatile
+    override var truncated: Boolean = false
+        private set
+
     /** Эндпоинт ссылки на скачивание живёт рядом с листингом. */
     private val downloadBase: HttpUrl = apiBase.newBuilder().addPathSegment("download").build()
 
@@ -90,7 +94,8 @@ class YandexPublicDiskSource(
             }
         }
 
-        if (collected.size >= MAX_ITEMS) {
+        truncated = collected.size >= MAX_ITEMS
+        if (truncated) {
             Log.w(TAG, "обход остановлен на пределе в $MAX_ITEMS элементов")
         }
         onProgress(collected.size, -1)
@@ -292,7 +297,7 @@ class YandexPublicDiskSource(
          * с запасом больше любого разумного альбома; на Диске побольше
          * отмечают подпапки.
          */
-        private const val MAX_ITEMS = 20_000
+        private const val MAX_ITEMS = 50_000
 
         // SimpleDateFormat не потокобезопасен, а листинг разбирается в фоновом потоке.
         private val TIMESTAMP_FORMAT: ThreadLocal<SimpleDateFormat> =

@@ -92,27 +92,32 @@ class FramePreparer(
     private val streamHead: suspend (MediaItem, Delivery.Streamed) -> File? = { _, _ -> null },
 ) {
     suspend fun prepare(item: MediaItem): PreparedItem = withContext(Dispatchers.IO) {
-        val background = backgroundFor(item)
-        try {
-            when (item.kind) {
-                MediaKind.VIDEO -> {
-                    val delivery = deliver(item)
-                    PreparedVideo(
-                        item = item,
-                        background = background,
-                        poster = posterFor(item, delivery),
-                        delivery = delivery,
-                    )
+        when (item.kind) {
+            MediaKind.VIDEO -> {
+                val delivery = deliver(item)
+                val poster = posterFor(item, delivery)
+                // Ролик без копии с Диска — фон из его же первого кадра.
+                val background = try {
+                    if (item.preview != null) backgroundFor(item) else blurred(poster)
+                } catch (e: Throwable) {
+                    poster.recycle()
+                    throw e
                 }
-                MediaKind.PHOTO -> PreparedPhoto(
-                    item = item,
-                    frame = decodePhoto(previewFile(item, PreviewSize.FULL)),
-                    background = background,
-                )
+                PreparedVideo(item = item, background = background, poster = poster, delivery = delivery)
             }
-        } catch (e: Throwable) {
-            background.recycle()
-            throw e
+            MediaKind.PHOTO -> {
+                val background = backgroundFor(item)
+                try {
+                    PreparedPhoto(
+                        item = item,
+                        frame = decodePhoto(previewFile(item, PreviewSize.FULL)),
+                        background = background,
+                    )
+                } catch (e: Throwable) {
+                    background.recycle()
+                    throw e
+                }
+            }
         }
     }
 
@@ -150,9 +155,17 @@ class FramePreparer(
             }
         }
         if (frame != null) return frame
+        if (item.preview == null) {
+            // Ни кадра, ни копии: тёмный постер, плеер закроет его первым кадром.
+            Log.d(TAG, "первый кадр ${item.name} не достался, копии нет — постер тёмный")
+            return Bitmap.createBitmap(16, 9, Bitmap.Config.ARGB_8888).apply { eraseColor(0xff101216.toInt()) }
+        }
         Log.d(TAG, "первый кадр ${item.name} не достался, постер — копия с Диска")
         return decode(previewFile(item, PreviewSize.FULL))
     }
+
+    private fun blurred(source: Bitmap): Bitmap =
+        BackgroundBlur.render(source, settings().blurSampleLongSide).also { it.prepareToDraw() }
 
     private fun firstFrame(attach: (MediaMetadataRetriever) -> Unit): Bitmap? {
         val retriever = MediaMetadataRetriever()

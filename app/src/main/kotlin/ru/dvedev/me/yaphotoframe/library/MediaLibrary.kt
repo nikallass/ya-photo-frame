@@ -101,10 +101,17 @@ class MediaLibrary(
         }
 
         val known = fresh.mapTo(mutableSetOf()) { it.path }
-        val removed = remembered.keys.count { it !in known && inScope(it) }
+        // Неполный обход ничего не удаляет: ненайденное просто не дошло.
+        val truncated = source.truncated
+        val missing = if (truncated) {
+            snapshot.entries.filter { inScope(it.item.path) && it.item.path !in known }
+        } else {
+            emptyList()
+        }
+        val removed = if (truncated) 0 else remembered.keys.count { it !in known && inScope(it) }
         val added = fresh.count { it.path !in remembered }
 
-        synchronized(this) { snapshot = LibrarySnapshot(syncedAtMillis = now, entries = entries) }
+        synchronized(this) { snapshot = LibrarySnapshot(syncedAtMillis = now, entries = entries + missing) }
         // Обход и так идёт в фоновом потоке, и его результат терять нельзя —
         // пишем сразу.
         store.save(snapshot)

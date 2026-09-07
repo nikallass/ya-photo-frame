@@ -359,10 +359,11 @@ class TunerServer(
                 showDate = values["showDate"]?.toBooleanStrictOrNull() ?: current.showDate,
                 // Пустое значение — законный выбор «вся папка целиком»,
                 // поэтому отличаем отсутствие ключа от пустой строки.
+                // Пути не подрезаем: у папки на Диске может быть пробел на
+                // конце имени, и после trim она не выбиралась никогда.
                 selectedFolders = values["selectedFolders"]
                     ?.split('\n')
-                    ?.map { it.trim() }
-                    ?.filter { it.isNotEmpty() }
+                    ?.filter { it.isNotBlank() }
                     ?.toSet()
                     ?: current.selectedFolders,
             )
