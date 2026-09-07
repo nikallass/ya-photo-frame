@@ -10,12 +10,20 @@ package ru.dvedev.me.yaphotoframe.tuner
  */
 object ImportFilter {
 
-    const val VOLUME_KEY = "externalStorageUuid"
+    const val VOLUME_KEY = "storageVolumeUuid"
+
+    /** Так том назывался в файлах до 1.4 — переносится под новым именем. */
+    const val OLD_VOLUME_KEY = "externalStorageUuid"
 
     /** Возвращает пары к применению; [hasVolume] — есть ли том с таким UUID на этом телевизоре. */
     fun filter(values: Map<String, String>, hasVolume: (String) -> Boolean): Map<String, String> {
-        val uuid = values[VOLUME_KEY]?.trim().orEmpty()
-        if (uuid.isEmpty() || hasVolume(uuid)) return values
-        return values - VOLUME_KEY
+        val chosen = (values[VOLUME_KEY] ?: values[OLD_VOLUME_KEY])?.trim()
+        val rest = values - OLD_VOLUME_KEY
+        if (chosen == null) return rest
+        if (chosen.isEmpty() || hasVolume(chosen)) return rest + (VOLUME_KEY to chosen)
+        return rest - VOLUME_KEY
     }
+
+    /** Какой том выбран в файле, хоть под новым именем, хоть под старым. */
+    fun chosenVolume(values: Map<String, String>): String? = values[VOLUME_KEY] ?: values[OLD_VOLUME_KEY]
 }

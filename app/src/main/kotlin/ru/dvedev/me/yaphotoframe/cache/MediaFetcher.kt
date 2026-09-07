@@ -7,6 +7,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.IOException
+import kotlin.coroutines.coroutineContext
 
 /** Ответ с кодом, по которому можно понять, что ссылка протухла, а не сеть пропала. */
 class HttpFailure(val code: Int, url: String) : IOException("$url вернул $code") {
@@ -14,17 +15,25 @@ class HttpFailure(val code: Int, url: String) : IOException("$url вернул $
     val isStaleLink: Boolean get() = code == 410 || code == 403 || code == 404
 }
 
-/** Кладёт содержимое ссылки в кэш, если его там ещё нет. */
-class MediaFetcher(
-    private val http: OkHttpClient,
-    private val cache: MediaCache,
-) {
+/** Кладёт содержимое ссылки в хранилище или кэш, если его там ещё нет. */
+class MediaFetcher(private val http: OkHttpClient) {
 
     /**
      * @param onProgress сколько байт уже записано; зовётся по ходу длинной
-     *   загрузки, чтобы страница могла показать, как качается гигабайтный ролик.
+     *   загрузки, чтобы страница могла показать, как качается гигабайтное видео.
      */
     suspend fun ensure(
+        storage: Storage,
+        key: String,
+        url: String,
+        onProgress: (Long) -> Unit = {},
+    ): File = withContext(Dispatchers.IO) {
+        if (storage.has(key)) return@withContext storage.file(key)
+        download(url, onProgress) { write -> storage.put(key, write) }
+    }
+
+    suspend fun ensure(
+        cache: MediaCache,
         key: String,
         url: String,
         onProgress: (Long) -> Unit = {},
@@ -33,19 +42,28 @@ class MediaFetcher(
             cache.touch(key)
             return@withContext cache.file(key)
         }
+        download(url, onProgress) { write -> cache.put(key, write) }
+    }
 
+    private suspend fun download(
+        url: String,
+        onProgress: (Long) -> Unit,
+        into: (write: (File) -> Unit) -> File,
+    ): File {
         val request = Request.Builder().url(url).build()
-        http.newCall(request).execute().use { response ->
+        // Отмену закачки (сменили отбор, вынули флешку) замечаем между кусками.
+        val context = coroutineContext
+        return http.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw HttpFailure(response.code, url)
             val body = response.body ?: throw IOException("пустой ответ от $url")
-            cache.put(key) { target ->
+            into { target ->
                 target.outputStream().use { out ->
                     val input = body.byteStream()
                     val buffer = ByteArray(COPY_BUFFER_BYTES)
                     var written = 0L
                     var reported = 0L
                     while (true) {
-                        ensureActive()
+                        context.ensureActive()
                         val read = input.read(buffer)
                         if (read < 0) break
                         out.write(buffer, 0, read)

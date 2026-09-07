@@ -96,6 +96,7 @@ class MediaLibrary(
                 // Замер и приговор декодера — тоже знание о файле, а не об
                 // обходе: без этого каждый переобход мерил бы ролики заново.
                 durationMillis = known?.durationMillis,
+                codec = known?.codec,
                 undecodable = known?.undecodable ?: false,
             )
         }
@@ -195,12 +196,12 @@ class MediaLibrary(
         scheduleSave()
     }
 
-    fun recordDuration(path: String, millis: Long) {
+    fun recordDuration(path: String, millis: Long, codec: String? = null) {
         val index = snapshot.entries.indexOfFirst { it.item.path == path }
         if (index < 0) return
 
         val updated = snapshot.entries.toMutableList()
-        updated[index] = updated[index].copy(durationMillis = millis)
+        updated[index] = updated[index].copy(durationMillis = millis, codec = codec ?: updated[index].codec)
         snapshot = snapshot.copy(entries = updated)
         scheduleSave()
     }

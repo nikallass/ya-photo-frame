@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Flowchart 1.4 — Storage</title>
+<style>
+  @page { size: A4 landscape; margin: 10mm; }
+  body { font: 13px/1.35 "DejaVu Sans", "Noto Sans", sans-serif; color: #111; margin: 0; }
+  .page { page-break-after: always; width: 277mm; height: 186mm; position: relative; overflow: hidden; }
+  .page:last-child { page-break-after: auto; }
+  h1 { font-size: 18px; margin: 0 0 2px; }
+  h2 { font-size: 15px; margin: 0 0 6px; color: #333; font-weight: 600; }
+  .sub { color: #555; font-size: 12px; margin-bottom: 6px; }
+  svg { width: 277mm; height: 152mm; display: block; }
+  .box rect { fill: #f4f6fa; stroke: #445; stroke-width: 1.2; }
+  .decision polygon { fill: #fff7e0; stroke: #a07a10; stroke-width: 1.2; }
+  .terminal rect { fill: #e6f4ea; stroke: #2a7a3a; stroke-width: 1.2; }
+  .skip rect { fill: #fbe9e7; stroke: #b3261e; stroke-width: 1.2; }
+  .store rect { fill: #e3ecfb; stroke: #1f4fa3; stroke-width: 1.2; }
+  .note rect { fill: #fff; stroke: #999; stroke-dasharray: 4 3; }
+  text { font: 11.5px "DejaVu Sans", "Noto Sans", sans-serif; }
+  .lbl { font-size: 10.5px; fill: #333; }
+  .lblbg { fill: #fff; }
+  .edge { fill: none; stroke: #333; stroke-width: 1.1; marker-end: url(#arrow); }
+  table { border-collapse: collapse; font-size: 11.5px; width: 100%; }
+  th, td { border: 1px solid #bbb; padding: 4px 6px; vertical-align: top; text-align: left; }
+  th { background: #eef1f6; }
+  .legend span { display: inline-block; padding: 2px 8px; margin-right: 8px; border: 1px solid #666; border-radius: 3px; font-size: 11px; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <h1>Photo frame 1.4 — “Storage”. Process flowchart</h1>
+  <div class="sub">Per the 1.4 storage specification, 2026-09-07. One storage for photos and videos; place — TV memory or a flash drive; three outcomes for a video: into storage, stream, skip.</div>
+  <div class="legend">
+    <span style="background:#f4f6fa">action</span>
+    <span style="background:#fff7e0">decision</span>
+    <span style="background:#e3ecfb">storage</span>
+    <span style="background:#e6f4ea">show</span>
+    <span style="background:#fbe9e7">skip</span>
+  </div>
+  <svg id="p1" viewBox="0 0 1040 620"></svg>
+</div>
+
+<div class="page">
+  <h2>Sheet 2. The path of a photo and a video from the prefetch window to the screen (steps C–G)</h2>
+  <svg id="p2" viewBox="0 0 1040 720"></svg>
+</div>
+
+<div class="page">
+  <h2>Sheet 3. Step D “Make room” and step H “Network speed”</h2>
+  <svg id="p3" viewBox="0 0 1040 640"></svg>
+</div>
+
+<div class="page">
+  <h2>Sheet 4. Events: flash drive, place, folder, network (steps J–M)</h2>
+  <svg id="p4" viewBox="0 0 1040 640"></svg>
+</div>
+
+<div class="page">
+  <h2>Sheet 5. Settings after the simplification</h2>
+  <table>
+    <tr><th style="width:18%">Section</th><th style="width:22%">Setting</th><th style="width:12%">Default</th><th>What it does</th></tr>
+    <tr><td rowspan="8">Media files</td><td>Video</td><td>on</td><td>Turns video off. The index still knows about videos.</td></tr>
+    <tr><td>Sound in video, Portraits in pairs, Skip small ones, New more often, Clock, Capture date</td><td>as before</td><td>Unchanged.</td></tr>
+    <tr><td>Video no longer than</td><td>2 min</td><td>After that the frame moves to the next slide. Zero — to the end.</td></tr>
+    <tr><td>File no heavier than</td><td>2 GB</td><td>A heavier file is skipped: not downloaded, not streamed, not shown. Zero — no limit.</td></tr>
+    <tr><td>Don’t keep lighter than</td><td>photo 0, video 0</td><td>One row, two sliders “photo” and “video”. A lighter photo is downloaded anew for every show, a lighter video is streamed. Zero — keep all.</td></tr>
+    <tr><td>Downloads during video</td><td>on</td><td>Off stops downloads while a video is on screen.</td></tr>
+    <tr><td colspan="3" style="color:#777">The “What to show” and “Video” sections merged.</td></tr>
+    <tr><td colspan="3" style="color:#777">Wording unified: “video” everywhere.</td></tr>
+    <tr><td rowspan="5">Storage</td><td>Storage place</td><td>TV memory</td><td>TV memory or an inserted flash drive. A drive is checked with a test write.</td></tr>
+    <tr><td>Storage capacity</td><td>memory: 2 GB; drive: by free space, reserve 1 GB</td><td>One row: a slider from 0 to the disk size and a “By free space” toggle. Off — the slider sets the capacity. On — the same slider becomes the “Reserve”: how much free space to leave alone, the rest is taken.</td></tr>
+    <tr><td>Network speed</td><td>auto</td><td>The average of the last three downloads; can be typed in, then the typed value decides.</td></tr>
+    <tr><td>Prefetch ahead</td><td>10</td><td>How many files ahead the queue is prepared. A long video download does not stop the queue.</td></tr>
+    <tr><td>Check Yandex Disk</td><td>1.5 h</td><td>Unchanged.</td></tr>
+    <tr><td>Removed</td><td colspan="3">“Photo cache”, “Video to cache up to”, “Video buffer”, “Network speed to Disk” in its old meaning, “Video no heavier than” (becomes “File no heavier than”), “Space reserve” (becomes the reserve in the “Storage capacity” row).</td></tr>
+  </table>
+</div>
+
+<script>
+const NS = 'http://www.w3.org/2000/svg';
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function defs(svg) {
+  const d = el('defs', {}, svg);
+  const m = el('marker', { id: 'arrow', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' }, d);
+  el('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: '#333' }, m);
+}
+// Узел: id, x, y (центр), w, h, строки текста, вид.
+function node(svg, n) {
+  const g = el('g', { class: n.kind || 'box' }, svg);
+  if (n.kind === 'decision') {
+    const pts = [[n.x, n.y - n.h / 2], [n.x + n.w / 2, n.y], [n.x, n.y + n.h / 2], [n.x - n.w / 2, n.y]].map(p => p.join(',')).join(' ');
+    el('polygon', { points: pts }, g);
+  } else {
+    el('rect', { x: n.x - n.w / 2, y: n.y - n.h / 2, width: n.w, height: n.h, rx: n.kind === 'terminal' || n.kind === 'skip' ? 14 : 4 }, g);
+  }
+  const lines = n.text.split('\n');
+  const lh = 14;
+  lines.forEach((ln, i) => {
+    el('text', { x: n.x, y: n.y - (lines.length - 1) * lh / 2 + i * lh + 4, 'text-anchor': 'middle', 'font-weight': i === 0 && n.bold ? 'bold' : 'normal' }, g).textContent = ln;
+  });
+  n.svg = svg;
+  return n;
+}
+// Точки выхода/входа по сторонам.
+function side(n, s) {
+  if (s === 'b') return [n.x, n.y + n.h / 2];
+  if (s === 't') return [n.x, n.y - n.h / 2];
+  if (s === 'l') return [n.x - n.w / 2, n.y];
+  if (s === 'r') return [n.x + n.w / 2, n.y];
+}
+// Ребро: from-side → (waypoints) → to-side, подпись у начала.
+function edge(svg, a, sa, b, sb, label, way, seg) {
+  const p = [side(a, sa)].concat(way || []).concat([side(b, sb)]);
+  el('path', { class: 'edge', d: 'M ' + p.map(q => q.join(' ')).join(' L ') }, svg);
+  if (label) {
+    const i = Math.min(seg || 0, p.length - 2);
+    const [x0, y0] = p[i], [x1, y1] = p[i + 1];
+    const lx = x0 + (x1 - x0) * 0.5, ly = y0 + (y1 - y0) * 0.5;
+    const t = el('text', { class: 'lbl', x: lx, y: ly - 3, 'text-anchor': 'middle' }, svg);
+    t.textContent = label;
+    const bb = t.getBBox();
+    const bg = el('rect', { class: 'lblbg', x: bb.x - 2, y: bb.y - 1, width: bb.width + 4, height: bb.height + 2 }, svg);
+    svg.insertBefore(bg, t);
+  }
+}
+
+// ───────── Лист 1: обзор ─────────
+(function () {
+  const s = document.getElementById('p1'); defs(s);
+  const disk = node(s, { x: 150, y: 70, w: 230, h: 64, text: 'Yandex Disk, public folder\nlisting, 1280 px copies,\nthe files themselves', kind: 'box', bold: true });
+  const index = node(s, { x: 470, y: 70, w: 240, h: 64, text: 'Index on the TV\npath, size, date, copy link,\nduration, bitrate, profile', kind: 'box', bold: true });
+  const queue = node(s, { x: 800, y: 70, w: 240, h: 64, text: 'Show queue\nrecency, freshness, folder selection\n“Prefetch ahead” window = 10', kind: 'box', bold: true });
+  const decide = node(s, { x: 800, y: 230, w: 300, h: 70, text: 'Decision per file\nthresholds → header → room', kind: 'decision' });
+  const store = node(s, { x: 150, y: 300, w: 260, h: 100, text: 'STORAGE (one)\nphotos and whole videos\nplace: TV memory or flash drive\ncapacity: slider or free − reserve\neviction: oldest first, videos before photos', kind: 'store', bold: true });
+  const stream = node(s, { x: 470, y: 300, w: 220, h: 56, text: 'Stream from Disk\nnothing is saved', kind: 'box' });
+  const skip = node(s, { x: 800, y: 400, w: 240, h: 50, text: 'Skip + diary entry', kind: 'skip' });
+  const screen = node(s, { x: 470, y: 520, w: 300, h: 56, text: 'SCREEN\nphoto / video from storage / streamed video', kind: 'terminal', bold: true });
+  const net = node(s, { x: 150, y: 520, w: 230, h: 56, text: 'Network speed\naverage of three downloads or typed', kind: 'note' });
+  edge(s, disk, 'r', index, 'l', 'walk');
+  edge(s, index, 'r', queue, 'l');
+  edge(s, queue, 'b', decide, 't', 'file in the window');
+  edge(s, decide, 'l', store, 'r', 'download whole', [[320, 230], [320, 300]], 1);
+  edge(s, decide, 'b', skip, 't', 'threshold, decoder, network too slow');
+  edge(s, decide, 'l', stream, 't', 'don’t keep or does not fit, network copes', [[470, 230]], 0);
+  edge(s, disk, 'b', store, 't', 'copies and files');
+  edge(s, store, 'b', net, 't', 'every download is a measurement', [[150, 440]], 1);
+  edge(s, store, 'b', screen, 'l', 'from file', [[150, 420], [300, 420], [300, 520]], 1);
+  edge(s, stream, 'b', screen, 't');
+  edge(s, net, 'r', decide, 'b', 'takes part in the decision', [[560, 590], [1000, 590], [1000, 300], [800, 300]], 1);
+})();
+
+// ───────── Лист 2: путь файла ─────────
+(function () {
+  const s = document.getElementById('p2'); defs(s);
+  const start = node(s, { x: 520, y: 30, w: 300, h: 40, text: 'A file entered the prefetch window', kind: 'box', bold: true });
+  const kind = node(s, { x: 520, y: 100, w: 240, h: 50, text: 'Photo or video?', kind: 'decision' });
+  // Снимок (слева)
+  const pLight = node(s, { x: 180, y: 190, w: 300, h: 60, text: 'Lighter than the “photo” threshold\nin “Don’t keep lighter than”?', kind: 'decision' });
+  const pTemp = node(s, { x: 180, y: 290, w: 220, h: 56, text: 'Download to a temporary file,\nshow, delete', kind: 'box' });
+  const pHave = node(s, { x: 180, y: 390, w: 240, h: 50, text: 'Already in storage?', kind: 'decision' });
+  const pFree = node(s, { x: 180, y: 500, w: 220, h: 44, text: 'Make room (D)', kind: 'store' });
+  const pGet = node(s, { x: 180, y: 600, w: 220, h: 44, text: 'Download the copy into storage', kind: 'store' });
+  const pShow = node(s, { x: 420, y: 600, w: 180, h: 44, text: 'Show the photo', kind: 'terminal' });
+  // Видео (справа)
+  const vOn = node(s, { x: 700, y: 170, w: 230, h: 50, text: '“Video” on?', kind: 'decision' });
+  const vBig = node(s, { x: 700, y: 245, w: 250, h: 56, text: 'Heavier than\n“File no heavier than”?', kind: 'decision' });
+  const vHead = node(s, { x: 700, y: 325, w: 250, h: 56, text: 'Read the header (2 requests):\nduration, bitrate, profile → index', kind: 'box' });
+  const vDec = node(s, { x: 700, y: 405, w: 260, h: 50, text: 'Profile decodable?', kind: 'decision' });
+  const vLight = node(s, { x: 700, y: 480, w: 300, h: 60, text: 'Lighter than the “video” threshold\nin “Don’t keep lighter than”?', kind: 'decision' });
+  const vHave = node(s, { x: 700, y: 560, w: 240, h: 50, text: 'Already in storage?', kind: 'decision' });
+  const vFit = node(s, { x: 935, y: 560, w: 200, h: 60, text: 'Fits the\nstorage capacity?', kind: 'decision' });
+  const vFree = node(s, { x: 935, y: 630, w: 180, h: 44, text: 'Make room (D)', kind: 'store' });
+  const vDl = node(s, { x: 935, y: 690, w: 200, h: 44, text: 'Download whole, one at a time;\n“waiting for download” in the queue', kind: 'store' });
+  const vNet = node(s, { x: 470, y: 480, w: 210, h: 60, text: 'Bitrate ≤\nnetwork speed?', kind: 'decision' });
+  const vStream = node(s, { x: 470, y: 400, w: 190, h: 44, text: 'Play as a stream', kind: 'terminal' });
+  const vShow = node(s, { x: 580, y: 690, w: 220, h: 44, text: 'Show from storage\nat the next slide change', kind: 'terminal' });
+  const sk1 = node(s, { x: 940, y: 170, w: 170, h: 44, text: 'Skip', kind: 'skip' });
+  const sk2 = node(s, { x: 940, y: 245, w: 170, h: 44, text: 'Skip,\ndiary “over the threshold”', kind: 'skip' });
+  const sk3 = node(s, { x: 940, y: 405, w: 190, h: 44, text: 'Mark undecodable,\nremove from the queue', kind: 'skip' });
+  const sk5 = node(s, { x: 470, y: 320, w: 190, h: 44, text: 'Skip,\n“heavier than the network”', kind: 'skip' });
+
+  edge(s, start, 'b', kind, 't');
+  edge(s, kind, 'l', pLight, 't', 'photo', [[180, 100]]);
+  edge(s, kind, 'r', vOn, 't', 'video', [[700, 100]]);
+  edge(s, pLight, 'b', pTemp, 't', 'yes');
+  edge(s, pLight, 'l', pHave, 'l', 'no', [[40, 190], [40, 390]], 0);
+  edge(s, pTemp, 'r', pShow, 'l', '', [[330, 290]]);
+  edge(s, pHave, 'b', pFree, 't', 'no');
+  edge(s, pHave, 'r', pShow, 'l', 'yes', [[330, 390]]);
+  edge(s, pFree, 'b', pGet, 't');
+  edge(s, pGet, 'r', pShow, 'l');
+  edge(s, vOn, 'r', sk1, 'l', 'no');
+  edge(s, vOn, 'b', vBig, 't', 'yes');
+  edge(s, vBig, 'r', sk2, 'l', 'yes');
+  edge(s, vBig, 'b', vHead, 't', 'no');
+  edge(s, vHead, 'b', vDec, 't');
+  edge(s, vDec, 'r', sk3, 'l', 'no');
+  edge(s, vDec, 'b', vLight, 't', 'yes');
+  edge(s, vLight, 'l', vNet, 'r', 'yes');
+  edge(s, vLight, 'b', vHave, 't', 'no');
+  edge(s, vHave, 'r', vFit, 'l', 'no');
+  edge(s, vHave, 'b', vShow, 't', 'yes', [[700, 620], [580, 620]], 0);
+  edge(s, vFit, 'b', vFree, 't', 'yes');
+  edge(s, vFree, 'b', vDl, 't');
+  edge(s, vDl, 'l', vShow, 'r', 'downloaded');
+  edge(s, vFit, 'r', vNet, 't', 'no', [[1036, 560], [1036, 445], [470, 445]], 0);
+  edge(s, vNet, 't', vStream, 'b', 'yes');
+  edge(s, vNet, 'l', sk5, 'b', 'no', [[365, 480], [365, 362], [470, 362]], 0);
+})();
+
+// ───────── Лист 3: место и скорость ─────────
+(function () {
+  const s = document.getElementById('p3'); defs(s);
+  const g0 = node(s, { x: 260, y: 40, w: 280, h: 40, text: 'D. Make room before a download', kind: 'box', bold: true });
+  const g1 = node(s, { x: 260, y: 120, w: 300, h: 60, text: '“By free space”\non?', kind: 'decision' });
+  const g2a = node(s, { x: 110, y: 220, w: 210, h: 56, text: 'Capacity = free on disk\n− reserve from the slider + taken by the frame', kind: 'store' });
+  const g2b = node(s, { x: 410, y: 220, w: 200, h: 56, text: 'Capacity = the same slider\nas capacity (≤ disk)', kind: 'store' });
+  const g3 = node(s, { x: 260, y: 320, w: 280, h: 60, text: 'File larger than\nthe whole capacity?', kind: 'decision' });
+  const g4 = node(s, { x: 260, y: 410, w: 300, h: 60, text: 'Taken + file ≤ capacity\nand free on disk?', kind: 'decision' });
+  const g5 = node(s, { x: 260, y: 510, w: 260, h: 56, text: 'Delete the oldest-shown:\nvideos first, then photos', kind: 'store' });
+  const g6 = node(s, { x: 560, y: 410, w: 180, h: 44, text: 'Room available → download', kind: 'terminal' });
+  const g7 = node(s, { x: 560, y: 320, w: 200, h: 56, text: 'Does not fit → step G\n(stream or skip)', kind: 'skip' });
+  const g8 = node(s, { x: 560, y: 590, w: 220, h: 56, text: 'Nothing left to delete →\ndoes not fit (G)', kind: 'skip' });
+  edge(s, g0, 'b', g1, 't');
+  edge(s, g1, 'l', g2a, 't', 'yes', [[110, 120]]);
+  edge(s, g1, 'r', g2b, 't', 'no', [[410, 120]]);
+  edge(s, g2a, 'b', g3, 't', '', [[110, 280], [260, 280]]);
+  edge(s, g2b, 'b', g3, 't', '', [[410, 280], [260, 280]]);
+  edge(s, g3, 'r', g7, 'l', 'yes');
+  edge(s, g3, 'b', g4, 't', 'no');
+  edge(s, g4, 'r', g6, 'l', 'yes');
+  edge(s, g4, 'b', g5, 't', 'no');
+  edge(s, g5, 'l', g4, 'l', 'check again', [[70, 510], [70, 410]], 1);
+  edge(s, g5, 'b', g8, 'l', 'empty', [[260, 590]], 1);
+
+  const z0 = node(s, { x: 830, y: 40, w: 260, h: 40, text: 'H. Network speed', kind: 'box', bold: true });
+  const z1 = node(s, { x: 830, y: 120, w: 240, h: 56, text: 'Download finished:\nspeed = size / time', kind: 'box' });
+  const z2 = node(s, { x: 830, y: 210, w: 240, h: 56, text: 'Remember; keep\nthe last three measurements', kind: 'box' });
+  const z3 = node(s, { x: 830, y: 300, w: 240, h: 56, text: 'Auto = average of three;\nshow on the page', kind: 'box' });
+  const z4 = node(s, { x: 830, y: 390, w: 280, h: 60, text: '“Network speed”\ntyped by hand?', kind: 'decision' });
+  const z5a = node(s, { x: 700, y: 490, w: 200, h: 44, text: 'The typed value decides', kind: 'terminal' });
+  const z5b = node(s, { x: 960, y: 490, w: 200, h: 44, text: 'The average decides', kind: 'terminal' });
+  const z6 = node(s, { x: 830, y: 580, w: 300, h: 44, text: 'No measurements yet → the network counts as slow', kind: 'note' });
+  edge(s, z0, 'b', z1, 't');
+  edge(s, z1, 'b', z2, 't');
+  edge(s, z2, 'b', z3, 't');
+  edge(s, z3, 'b', z4, 't');
+  edge(s, z4, 'l', z5a, 't', 'yes', [[700, 390]]);
+  edge(s, z4, 'r', z5b, 't', 'no', [[960, 390]]);
+})();
+
+// ───────── Лист 4: события ─────────
+(function () {
+  const s = document.getElementById('p4'); defs(s);
+  const e1 = node(s, { x: 150, y: 50, w: 220, h: 44, text: 'J. Flash drive removed', kind: 'box', bold: true });
+  const e1a = node(s, { x: 150, y: 130, w: 240, h: 56, text: 'Notice within seconds;\ndiary + “State”', kind: 'box' });
+  const e1b = node(s, { x: 150, y: 220, w: 240, h: 56, text: 'Temporarily: storage =\nTV memory, same rules', kind: 'store' });
+  const e1c = node(s, { x: 150, y: 310, w: 240, h: 44, text: 'The screen does not go empty', kind: 'terminal' });
+  const e2 = node(s, { x: 150, y: 400, w: 220, h: 44, text: 'Flash drive returned', kind: 'box', bold: true });
+  const e2a = node(s, { x: 150, y: 480, w: 240, h: 56, text: 'Work with the drive again,\nold files are in place', kind: 'store' });
+  const e2b = node(s, { x: 150, y: 570, w: 260, h: 56, text: 'Read what settled in memory,\ndownload new files to the drive', kind: 'box' });
+  edge(s, e1, 'b', e1a, 't'); edge(s, e1a, 'b', e1b, 't'); edge(s, e1b, 'b', e1c, 't');
+  edge(s, e2, 'b', e2a, 't'); edge(s, e2a, 'b', e2b, 't');
+
+  const l1 = node(s, { x: 520, y: 50, w: 240, h: 44, text: 'K. Place changed by hand', kind: 'box', bold: true });
+  const l1a = node(s, { x: 520, y: 130, w: 240, h: 56, text: 'New files → the new place', kind: 'store' });
+  const l1b = node(s, { x: 520, y: 220, w: 240, h: 56, text: 'Old ones stay in the old place;\nfiles on a drive can be taken away', kind: 'box' });
+  const m1 = node(s, { x: 520, y: 330, w: 240, h: 44, text: 'L. Disk folder changed', kind: 'box', bold: true });
+  const m1a = node(s, { x: 520, y: 410, w: 240, h: 56, text: 'Clear the storage\nin both places and the index', kind: 'store' });
+  const m1b = node(s, { x: 520, y: 500, w: 240, h: 44, text: 'Walk again', kind: 'box' });
+  edge(s, l1, 'b', l1a, 't'); edge(s, l1a, 'b', l1b, 't');
+  edge(s, m1, 'b', m1a, 't'); edge(s, m1a, 'b', m1b, 't');
+
+  const n1 = node(s, { x: 880, y: 50, w: 220, h: 44, text: 'M. No network', kind: 'box', bold: true });
+  const n1a = node(s, { x: 880, y: 130, w: 240, h: 56, text: 'Show from storage\nwhat is there', kind: 'terminal' });
+  const n1b = node(s, { x: 880, y: 220, w: 240, h: 56, text: 'Try again;\nrefresh expired links', kind: 'box' });
+  const p1 = node(s, { x: 880, y: 330, w: 240, h: 44, text: 'Downloads during video', kind: 'box', bold: true });
+  const p1a = node(s, { x: 880, y: 410, w: 300, h: 60, text: '“Downloads during video”\non?', kind: 'decision' });
+  const p1b = node(s, { x: 760, y: 510, w: 200, h: 44, text: 'Download as usual', kind: 'box' });
+  const p1c = node(s, { x: 1000, y: 510, w: 220, h: 56, text: 'Hold while a video is on screen;\nalways download photos', kind: 'box' });
+  edge(s, n1, 'b', n1a, 't'); edge(s, n1a, 'b', n1b, 't');
+  edge(s, p1, 'b', p1a, 't');
+  edge(s, p1a, 'l', p1b, 't', 'yes', [[760, 410]]);
+  edge(s, p1a, 'r', p1c, 't', 'no', [[1000, 410]]);
+})();
+</script>
+</body>
+</html>

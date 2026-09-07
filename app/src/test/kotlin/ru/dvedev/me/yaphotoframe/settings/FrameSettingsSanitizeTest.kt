@@ -1,9 +1,7 @@
 package ru.dvedev.me.yaphotoframe.settings
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
-import ru.dvedev.me.yaphotoframe.cache.CachePolicy
 import ru.dvedev.me.yaphotoframe.ui.FrameSettings
 
 /**
@@ -15,24 +13,27 @@ import ru.dvedev.me.yaphotoframe.ui.FrameSettings
 class FrameSettingsSanitizeTest {
 
     @Test
-    fun `бюджет кэша меньше мегабайта не роняет нормализацию`() {
-        val sanitized = FrameSettings(cacheBudgetBytes = 300 * 1024).sanitized()
+    fun `отрицательные объёмы хранилища приводятся к нулю`() {
+        val sanitized = FrameSettings(
+            storageBytes = -1,
+            storageReserveBytes = -5,
+            minStorePhotoBytes = -1,
+            minStoreVideoBytes = -1,
+            maxFileBytes = -1,
+            networkBps = -1,
+        ).sanitized()
 
-        assertEquals(CachePolicy.MIN_BUDGET_BYTES, sanitized.cacheBudgetBytes)
-        assertTrue(
-            "порог не может быть больше бюджета",
-            sanitized.cacheItemThresholdBytes <= sanitized.cacheBudgetBytes,
-        )
+        assertEquals(0L, sanitized.storageBytes)
+        assertEquals(0L, sanitized.storageReserveBytes)
+        assertEquals(0L, sanitized.minStorePhotoBytes)
+        assertEquals(0L, sanitized.minStoreVideoBytes)
+        assertEquals(0L, sanitized.maxFileBytes)
+        assertEquals(0L, sanitized.networkBps)
     }
 
     @Test
-    fun `порог кэширования прижимается к нормализованному бюджету`() {
-        val sanitized = FrameSettings(
-            cacheBudgetBytes = 100L * 1024 * 1024,
-            cacheItemThresholdBytes = 900L * 1024 * 1024,
-        ).sanitized()
-
-        assertEquals(100L * 1024 * 1024, sanitized.cacheItemThresholdBytes)
+    fun `UUID тома обрезается по краям`() {
+        assertEquals("AAAA-1111", FrameSettings(storageVolumeUuid = " AAAA-1111 ").sanitized().storageVolumeUuid)
     }
 
     @Test
@@ -56,7 +57,6 @@ class FrameSettingsSanitizeTest {
 
     @Test
     fun `умолчания проходят нормализацию без изменений`() {
-        // Ползунков скорости больше нет; всё, что осталось, лежит в границах.
         assertEquals(FrameSettings(), FrameSettings().sanitized())
     }
 }

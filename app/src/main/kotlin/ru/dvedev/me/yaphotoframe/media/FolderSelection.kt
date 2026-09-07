@@ -11,8 +11,14 @@ package ru.dvedev.me.yaphotoframe.media
  * подряд и постепенно разбирает её, помечая разобранное. Показывать при этом
  * весь ворох целиком — значит показывать и то, что ещё не просмотрено.
  */
-@JvmInline
-value class FolderSelection(private val paths: Set<String>) {
+class FolderSelection private constructor(private val paths: Set<String>) {
+
+    /**
+     * Префиксы считаются один раз: отбор спрашивают на каждый файл при
+     * каждом наборе очереди, и на сотне отмеченных папок и сорока тысячах
+     * файлов склейка строки на каждую проверку стоила секунды.
+     */
+    private val prefixes: List<String> = paths.map(::prefixOf)
 
     val isEmpty: Boolean get() = paths.isEmpty()
 
@@ -20,9 +26,16 @@ value class FolderSelection(private val paths: Set<String>) {
 
     /** Показывать ли файл по этому пути. */
     fun includes(filePath: String): Boolean {
-        if (paths.isEmpty()) return true
-        return paths.any { filePath.startsWith(prefixOf(it)) }
+        if (prefixes.isEmpty()) return true
+        for (prefix in prefixes) if (filePath.startsWith(prefix)) return true
+        return false
     }
+
+    override fun equals(other: Any?): Boolean = other is FolderSelection && other.paths == paths
+
+    override fun hashCode(): Int = paths.hashCode()
+
+    override fun toString(): String = "FolderSelection($paths)"
 
     /**
      * Спускаться ли в эту папку при обходе.

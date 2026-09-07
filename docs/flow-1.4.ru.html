@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Блок-схема 1.4 — Хранилище</title>
+<style>
+  @page { size: A4 landscape; margin: 10mm; }
+  body { font: 13px/1.35 "DejaVu Sans", "Noto Sans", sans-serif; color: #111; margin: 0; }
+  .page { page-break-after: always; width: 277mm; height: 186mm; position: relative; overflow: hidden; }
+  .page:last-child { page-break-after: auto; }
+  h1 { font-size: 18px; margin: 0 0 2px; }
+  h2 { font-size: 15px; margin: 0 0 6px; color: #333; font-weight: 600; }
+  .sub { color: #555; font-size: 12px; margin-bottom: 6px; }
+  svg { width: 277mm; height: 152mm; display: block; }
+  .box rect { fill: #f4f6fa; stroke: #445; stroke-width: 1.2; }
+  .decision polygon { fill: #fff7e0; stroke: #a07a10; stroke-width: 1.2; }
+  .terminal rect { fill: #e6f4ea; stroke: #2a7a3a; stroke-width: 1.2; }
+  .skip rect { fill: #fbe9e7; stroke: #b3261e; stroke-width: 1.2; }
+  .store rect { fill: #e3ecfb; stroke: #1f4fa3; stroke-width: 1.2; }
+  .note rect { fill: #fff; stroke: #999; stroke-dasharray: 4 3; }
+  text { font: 11.5px "DejaVu Sans", "Noto Sans", sans-serif; }
+  .lbl { font-size: 10.5px; fill: #333; }
+  .lblbg { fill: #fff; }
+  .edge { fill: none; stroke: #333; stroke-width: 1.1; marker-end: url(#arrow); }
+  table { border-collapse: collapse; font-size: 11.5px; width: 100%; }
+  th, td { border: 1px solid #bbb; padding: 4px 6px; vertical-align: top; text-align: left; }
+  th { background: #eef1f6; }
+  .legend span { display: inline-block; padding: 2px 8px; margin-right: 8px; border: 1px solid #666; border-radius: 3px; font-size: 11px; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <h1>Фоторамка 1.4 — «Хранилище». Блок-схема процесса</h1>
+  <div class="sub">По спецификации docs/SPEC-v1.4-video-storage.md, 2026-09-07. Одно хранилище для снимков и видео; место — память телевизора или флешка; три исхода для видео: в хранилище, потоком, пропуск.</div>
+  <div class="legend">
+    <span style="background:#f4f6fa">действие</span>
+    <span style="background:#fff7e0">решение</span>
+    <span style="background:#e3ecfb">хранилище</span>
+    <span style="background:#e6f4ea">показ</span>
+    <span style="background:#fbe9e7">пропуск</span>
+  </div>
+  <svg id="p1" viewBox="0 0 1040 620"></svg>
+</div>
+
+<div class="page">
+  <h2>Лист 2. Путь снимка и видео от окна предзагрузки до экрана (шаги В–Ж спецификации)</h2>
+  <svg id="p2" viewBox="0 0 1040 720"></svg>
+</div>
+
+<div class="page">
+  <h2>Лист 3. Шаг Г «Освободить место» и шаг З «Скорость сети»</h2>
+  <svg id="p3" viewBox="0 0 1040 640"></svg>
+</div>
+
+<div class="page">
+  <h2>Лист 4. События: флешка, место, папка, сеть (шаги К–Н)</h2>
+  <svg id="p4" viewBox="0 0 1040 640"></svg>
+</div>
+
+<div class="page">
+  <h2>Лист 5. Настройки после упрощения</h2>
+  <table>
+    <tr><th style="width:18%">Раздел</th><th style="width:22%">Настройка</th><th style="width:12%">Умолчание</th><th>Что делает</th></tr>
+    <tr><td rowspan="8">Медиафайлы</td><td>Видео</td><td>вкл</td><td>Выключает показ видео. Индекс продолжает знать о видео.</td></tr>
+    <tr><td>Звук в видео, Вертикальные парами, Пропускать мелкие, Новое чаще, Часы, Дата съёмки</td><td>как сейчас</td><td>Без изменений.</td></tr>
+    <tr><td>Видео не дольше</td><td>2 мин</td><td>Через столько рамка переходит к следующему кадру. Ноль — до конца.</td></tr>
+    <tr><td>Файл не тяжелее</td><td>2 ГБ</td><td>Файл тяжелее порога рамка пропускает: не качает, не стримит, не показывает. Ноль — без ограничения.</td></tr>
+    <tr><td>Не хранить легче</td><td>фото 0, видео 0</td><td>Одна строка, два бегунка «фото» и «видео». Снимок легче своего порога рамка качает заново при каждом показе, видео легче своего порога играет потоком. Ноль — хранить все.</td></tr>
+    <tr><td>Закачки во время видео</td><td>вкл</td><td>Выключенная останавливает закачки, пока на экране видео.</td></tr>
+    <tr><td colspan="3" style="color:#777">Слились разделы «Что показывать» и «Видео».</td></tr>
+    <tr><td colspan="3" style="color:#777">Слово «ролик» заменяется на «видео» везде.</td></tr>
+    <tr><td rowspan="5">Хранилище</td><td>Место хранилища</td><td>память телевизора</td><td>Память телевизора или вставленная флешка. Флешку рамка проверяет пробной записью.</td></tr>
+    <tr><td>Объём хранилища</td><td>память: 2 ГБ; флешка: по свободному, запас 1 ГБ</td><td>Одна строка: бегунок от 0 до размера диска и переключатель «По свободному месту». Выключен — бегунок задаёт объём под снимки и видео. Включён — тот же бегунок становится «Запасом»: сколько свободного не трогать, остальное занимать.</td></tr>
+    <tr><td>Скорость сети</td><td>авто</td><td>Среднее последних трёх закачек; можно вписать вручную, тогда решает вписанное.</td></tr>
+    <tr><td>Подгружать заранее</td><td>10</td><td>На сколько файлов вперёд рамка готовит очередь. Долгая закачка видео очередь не останавливает.</td></tr>
+    <tr><td>Проверять Я.Диск</td><td>1,5 ч</td><td>Без изменений.</td></tr>
+    <tr><td>Уходят</td><td colspan="3">«Кэш для фото», «Ролик в кэш до», «Буфер для видео», «Скорость сети до Я.Диска» в прежнем смысле, «Ролик не тяжелее» (становится «Файл не тяжелее»), «Резерв места» (становится запасом в строке «Объём хранилища»).</td></tr>
+  </table>
+</div>
+
+<script>
+const NS = 'http://www.w3.org/2000/svg';
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function defs(svg) {
+  const d = el('defs', {}, svg);
+  const m = el('marker', { id: 'arrow', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' }, d);
+  el('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: '#333' }, m);
+}
+// Узел: id, x, y (центр), w, h, строки текста, вид.
+function node(svg, n) {
+  const g = el('g', { class: n.kind || 'box' }, svg);
+  if (n.kind === 'decision') {
+    const pts = [[n.x, n.y - n.h / 2], [n.x + n.w / 2, n.y], [n.x, n.y + n.h / 2], [n.x - n.w / 2, n.y]].map(p => p.join(',')).join(' ');
+    el('polygon', { points: pts }, g);
+  } else {
+    el('rect', { x: n.x - n.w / 2, y: n.y - n.h / 2, width: n.w, height: n.h, rx: n.kind === 'terminal' || n.kind === 'skip' ? 14 : 4 }, g);
+  }
+  const lines = n.text.split('\n');
+  const lh = 14;
+  lines.forEach((ln, i) => {
+    el('text', { x: n.x, y: n.y - (lines.length - 1) * lh / 2 + i * lh + 4, 'text-anchor': 'middle', 'font-weight': i === 0 && n.bold ? 'bold' : 'normal' }, g).textContent = ln;
+  });
+  n.svg = svg;
+  return n;
+}
+// Точки выхода/входа по сторонам.
+function side(n, s) {
+  if (s === 'b') return [n.x, n.y + n.h / 2];
+  if (s === 't') return [n.x, n.y - n.h / 2];
+  if (s === 'l') return [n.x - n.w / 2, n.y];
+  if (s === 'r') return [n.x + n.w / 2, n.y];
+}
+// Ребро: from-side → (waypoints) → to-side, подпись у начала.
+function edge(svg, a, sa, b, sb, label, way, seg) {
+  const p = [side(a, sa)].concat(way || []).concat([side(b, sb)]);
+  el('path', { class: 'edge', d: 'M ' + p.map(q => q.join(' ')).join(' L ') }, svg);
+  if (label) {
+    const i = Math.min(seg || 0, p.length - 2);
+    const [x0, y0] = p[i], [x1, y1] = p[i + 1];
+    const lx = x0 + (x1 - x0) * 0.5, ly = y0 + (y1 - y0) * 0.5;
+    const t = el('text', { class: 'lbl', x: lx, y: ly - 3, 'text-anchor': 'middle' }, svg);
+    t.textContent = label;
+    const bb = t.getBBox();
+    const bg = el('rect', { class: 'lblbg', x: bb.x - 2, y: bb.y - 1, width: bb.width + 4, height: bb.height + 2 }, svg);
+    svg.insertBefore(bg, t);
+  }
+}
+
+// ───────── Лист 1: обзор ─────────
+(function () {
+  const s = document.getElementById('p1'); defs(s);
+  const disk = node(s, { x: 150, y: 70, w: 230, h: 64, text: 'Я.Диск, публичная папка\nлистинг, копии 1280 px,\nсами файлы', kind: 'box', bold: true });
+  const index = node(s, { x: 470, y: 70, w: 240, h: 64, text: 'Индекс на телевизоре\nпуть, размер, дата, копия,\nдлительность, битрейт, профиль', kind: 'box', bold: true });
+  const queue = node(s, { x: 800, y: 70, w: 240, h: 64, text: 'Очередь показа\nдавность, свежесть, отбор папок\nокно «Подгружать заранее» = 10', kind: 'box', bold: true });
+  const decide = node(s, { x: 800, y: 230, w: 300, h: 70, text: 'Решение по файлу\nпороги → заголовок → место', kind: 'decision' });
+  const store = node(s, { x: 150, y: 300, w: 260, h: 100, text: 'ХРАНИЛИЩЕ (одно)\nснимки и видео целиком\nместо: память ТВ или флешка\nобъём: бегунок или свободное − запас\nвытеснение: самое старое, видео раньше', kind: 'store', bold: true });
+  const stream = node(s, { x: 470, y: 300, w: 220, h: 56, text: 'Потоком с Диска\nничего не сохраняется', kind: 'box' });
+  const skip = node(s, { x: 800, y: 400, w: 240, h: 50, text: 'Пропуск + запись в дневник', kind: 'skip' });
+  const screen = node(s, { x: 470, y: 520, w: 300, h: 56, text: 'ЭКРАН\nснимок / видео из хранилища / видео потоком', kind: 'terminal', bold: true });
+  const net = node(s, { x: 150, y: 520, w: 230, h: 56, text: 'Скорость сети\nсреднее трёх закачек или вручную', kind: 'note' });
+  edge(s, disk, 'r', index, 'l', 'обход');
+  edge(s, index, 'r', queue, 'l');
+  edge(s, queue, 'b', decide, 't', 'файл в окне');
+  edge(s, decide, 'l', store, 'r', 'скачать целиком', [[320, 230], [320, 300]], 1);
+  edge(s, decide, 'b', skip, 't', 'порог, декодер, сеть не тянет');
+  edge(s, decide, 'l', stream, 't', 'не хранить или не помещается, сеть тянет', [[470, 230]], 0);
+  edge(s, disk, 'b', store, 't', 'копии и файлы');
+  edge(s, store, 'b', net, 't', 'каждая закачка — замер', [[150, 440]], 1);
+  edge(s, store, 'b', screen, 'l', 'из файла', [[150, 420], [300, 420], [300, 520]], 1);
+  edge(s, stream, 'b', screen, 't');
+  edge(s, net, 'r', decide, 'b', 'участвует в решении', [[560, 590], [1000, 590], [1000, 300], [800, 300]], 1);
+})();
+
+// ───────── Лист 2: путь файла ─────────
+(function () {
+  const s = document.getElementById('p2'); defs(s);
+  const start = node(s, { x: 520, y: 30, w: 300, h: 40, text: 'Файл попал в окно предзагрузки', kind: 'box', bold: true });
+  const kind = node(s, { x: 520, y: 100, w: 240, h: 50, text: 'Снимок или видео?', kind: 'decision' });
+  // Снимок (слева)
+  const pLight = node(s, { x: 180, y: 190, w: 300, h: 60, text: 'Легче порога «фото»\nв «Не хранить легче»?', kind: 'decision' });
+  const pTemp = node(s, { x: 180, y: 290, w: 220, h: 56, text: 'Скачать во временный файл,\nпоказать, удалить', kind: 'box' });
+  const pHave = node(s, { x: 180, y: 390, w: 240, h: 50, text: 'Уже в хранилище?', kind: 'decision' });
+  const pFree = node(s, { x: 180, y: 500, w: 220, h: 44, text: 'Освободить место (Г)', kind: 'store' });
+  const pGet = node(s, { x: 180, y: 600, w: 220, h: 44, text: 'Скачать копию в хранилище', kind: 'store' });
+  const pShow = node(s, { x: 420, y: 600, w: 180, h: 44, text: 'Показать снимок', kind: 'terminal' });
+  // Видео (справа)
+  const vOn = node(s, { x: 700, y: 170, w: 230, h: 50, text: '«Видео» включено?', kind: 'decision' });
+  const vBig = node(s, { x: 700, y: 245, w: 250, h: 56, text: 'Тяжелее\n«Файл не тяжелее»?', kind: 'decision' });
+  const vHead = node(s, { x: 700, y: 325, w: 250, h: 56, text: 'Прочитать заголовок (2 запроса):\nдлительность, битрейт, профиль → индекс', kind: 'box' });
+  const vDec = node(s, { x: 700, y: 405, w: 260, h: 50, text: 'Профиль декодируется?', kind: 'decision' });
+  const vLight = node(s, { x: 700, y: 480, w: 300, h: 60, text: 'Легче порога «видео»\nв «Не хранить легче»?', kind: 'decision' });
+  const vHave = node(s, { x: 700, y: 560, w: 240, h: 50, text: 'Уже в хранилище?', kind: 'decision' });
+  const vFit = node(s, { x: 935, y: 560, w: 200, h: 60, text: 'Помещается\nв объём хранилища?', kind: 'decision' });
+  const vFree = node(s, { x: 935, y: 630, w: 180, h: 44, text: 'Освободить место (Г)', kind: 'store' });
+  const vDl = node(s, { x: 935, y: 690, w: 200, h: 44, text: 'Качать целиком, по одному;\nв очереди «ждёт закачки»', kind: 'store' });
+  const vNet = node(s, { x: 470, y: 480, w: 210, h: 60, text: 'Битрейт ≤\nскорость сети?', kind: 'decision' });
+  const vStream = node(s, { x: 470, y: 400, w: 190, h: 44, text: 'Играть потоком', kind: 'terminal' });
+  const vShow = node(s, { x: 580, y: 690, w: 220, h: 44, text: 'Показать из хранилища\nна ближайшей смене кадра', kind: 'terminal' });
+  const sk1 = node(s, { x: 940, y: 170, w: 170, h: 44, text: 'Пропустить', kind: 'skip' });
+  const sk2 = node(s, { x: 940, y: 245, w: 170, h: 44, text: 'Пропустить,\nдневник «тяжелее порога»', kind: 'skip' });
+  const sk3 = node(s, { x: 940, y: 405, w: 190, h: 44, text: 'Пометить недекодируемым,\nубрать из очереди', kind: 'skip' });
+  const sk5 = node(s, { x: 470, y: 320, w: 190, h: 44, text: 'Пропустить,\n«тяжелее сети»', kind: 'skip' });
+
+  edge(s, start, 'b', kind, 't');
+  edge(s, kind, 'l', pLight, 't', 'снимок', [[180, 100]]);
+  edge(s, kind, 'r', vOn, 't', 'видео', [[700, 100]]);
+  edge(s, pLight, 'b', pTemp, 't', 'да');
+  edge(s, pLight, 'l', pHave, 'l', 'нет', [[40, 190], [40, 390]], 0);
+  edge(s, pTemp, 'r', pShow, 'l', '', [[330, 290]]);
+  edge(s, pHave, 'b', pFree, 't', 'нет');
+  edge(s, pHave, 'r', pShow, 'l', 'да', [[330, 390]]);
+  edge(s, pFree, 'b', pGet, 't');
+  edge(s, pGet, 'r', pShow, 'l');
+  edge(s, vOn, 'r', sk1, 'l', 'нет');
+  edge(s, vOn, 'b', vBig, 't', 'да');
+  edge(s, vBig, 'r', sk2, 'l', 'да');
+  edge(s, vBig, 'b', vHead, 't', 'нет');
+  edge(s, vHead, 'b', vDec, 't');
+  edge(s, vDec, 'r', sk3, 'l', 'нет');
+  edge(s, vDec, 'b', vLight, 't', 'да');
+  edge(s, vLight, 'l', vNet, 'r', 'да');
+  edge(s, vLight, 'b', vHave, 't', 'нет');
+  edge(s, vHave, 'r', vFit, 'l', 'нет');
+  edge(s, vHave, 'b', vShow, 't', 'да', [[700, 620], [580, 620]], 0);
+  edge(s, vFit, 'b', vFree, 't', 'да');
+  edge(s, vFree, 'b', vDl, 't');
+  edge(s, vDl, 'l', vShow, 'r', 'докачалось');
+  edge(s, vFit, 'r', vNet, 't', 'нет', [[1036, 560], [1036, 445], [470, 445]], 0);
+  edge(s, vNet, 't', vStream, 'b', 'да');
+  edge(s, vNet, 'l', sk5, 'b', 'нет', [[365, 480], [365, 362], [470, 362]], 0);
+})();
+
+// ───────── Лист 3: место и скорость ─────────
+(function () {
+  const s = document.getElementById('p3'); defs(s);
+  const g0 = node(s, { x: 260, y: 40, w: 280, h: 40, text: 'Г. Освободить место перед закачкой', kind: 'box', bold: true });
+  const g1 = node(s, { x: 260, y: 120, w: 300, h: 60, text: '«По свободному месту»\nвключено?', kind: 'decision' });
+  const g2a = node(s, { x: 110, y: 220, w: 210, h: 56, text: 'Объём = свободно на диске\n− запас с бегунка + занято рамкой', kind: 'store' });
+  const g2b = node(s, { x: 410, y: 220, w: 200, h: 56, text: 'Объём = тот же бегунок\nкак объём (≤ диск)', kind: 'store' });
+  const g3 = node(s, { x: 260, y: 320, w: 280, h: 60, text: 'Файл больше объёма\nцеликом?', kind: 'decision' });
+  const g4 = node(s, { x: 260, y: 410, w: 300, h: 60, text: 'Занято + файл ≤ объём\nи свободно на диске?', kind: 'decision' });
+  const g5 = node(s, { x: 260, y: 510, w: 260, h: 56, text: 'Удалить самое старое по показу:\nсначала видео, потом снимки', kind: 'store' });
+  const g6 = node(s, { x: 560, y: 410, w: 180, h: 44, text: 'Место есть → качать', kind: 'terminal' });
+  const g7 = node(s, { x: 560, y: 320, w: 200, h: 56, text: 'Не помещается → шаг Ж\n(потоком или пропуск)', kind: 'skip' });
+  const g8 = node(s, { x: 560, y: 590, w: 220, h: 56, text: 'Удалять больше нечего →\nне помещается (Ж)', kind: 'skip' });
+  edge(s, g0, 'b', g1, 't');
+  edge(s, g1, 'l', g2a, 't', 'да', [[110, 120]]);
+  edge(s, g1, 'r', g2b, 't', 'нет', [[410, 120]]);
+  edge(s, g2a, 'b', g3, 't', '', [[110, 280], [260, 280]]);
+  edge(s, g2b, 'b', g3, 't', '', [[410, 280], [260, 280]]);
+  edge(s, g3, 'r', g7, 'l', 'да');
+  edge(s, g3, 'b', g4, 't', 'нет');
+  edge(s, g4, 'r', g6, 'l', 'да');
+  edge(s, g4, 'b', g5, 't', 'нет');
+  edge(s, g5, 'l', g4, 'l', 'снова проверить', [[70, 510], [70, 410]], 1);
+  edge(s, g5, 'b', g8, 'l', 'пусто', [[260, 590]], 1);
+
+  const z0 = node(s, { x: 830, y: 40, w: 260, h: 40, text: 'З. Скорость сети', kind: 'box', bold: true });
+  const z1 = node(s, { x: 830, y: 120, w: 240, h: 56, text: 'Закачка кончилась:\nскорость = размер / время', kind: 'box' });
+  const z2 = node(s, { x: 830, y: 210, w: 240, h: 56, text: 'Запомнить; хранить\nтри последних замера', kind: 'box' });
+  const z3 = node(s, { x: 830, y: 300, w: 240, h: 56, text: 'Авто = среднее трёх;\nпоказать на странице', kind: 'box' });
+  const z4 = node(s, { x: 830, y: 390, w: 280, h: 60, text: '«Скорость сети»\nвписана вручную?', kind: 'decision' });
+  const z5a = node(s, { x: 700, y: 490, w: 200, h: 44, text: 'Решает вписанное', kind: 'terminal' });
+  const z5b = node(s, { x: 960, y: 490, w: 200, h: 44, text: 'Решает среднее', kind: 'terminal' });
+  const z6 = node(s, { x: 830, y: 580, w: 300, h: 44, text: 'Замеров ещё нет → сеть считается медленной', kind: 'note' });
+  edge(s, z0, 'b', z1, 't');
+  edge(s, z1, 'b', z2, 't');
+  edge(s, z2, 'b', z3, 't');
+  edge(s, z3, 'b', z4, 't');
+  edge(s, z4, 'l', z5a, 't', 'да', [[700, 390]]);
+  edge(s, z4, 'r', z5b, 't', 'нет', [[960, 390]]);
+})();
+
+// ───────── Лист 4: события ─────────
+(function () {
+  const s = document.getElementById('p4'); defs(s);
+  const e1 = node(s, { x: 150, y: 50, w: 220, h: 44, text: 'К. Флешку вынули', kind: 'box', bold: true });
+  const e1a = node(s, { x: 150, y: 130, w: 240, h: 56, text: 'Заметить за секунды;\nдневник + «Состояние»', kind: 'box' });
+  const e1b = node(s, { x: 150, y: 220, w: 240, h: 56, text: 'Временно: хранилище =\nпамять телевизора, те же правила', kind: 'store' });
+  const e1c = node(s, { x: 150, y: 310, w: 240, h: 44, text: 'Экран не пустеет', kind: 'terminal' });
+  const e2 = node(s, { x: 150, y: 400, w: 220, h: 44, text: 'Флешку вернули', kind: 'box', bold: true });
+  const e2a = node(s, { x: 150, y: 480, w: 240, h: 56, text: 'Снова работать с флешкой,\nпрежние файлы на месте', kind: 'store' });
+  const e2b = node(s, { x: 150, y: 570, w: 260, h: 56, text: 'Осевшее в памяти читать,\nновое качать на флешку', kind: 'box' });
+  edge(s, e1, 'b', e1a, 't'); edge(s, e1a, 'b', e1b, 't'); edge(s, e1b, 'b', e1c, 't');
+  edge(s, e2, 'b', e2a, 't'); edge(s, e2a, 'b', e2b, 't');
+
+  const l1 = node(s, { x: 520, y: 50, w: 240, h: 44, text: 'Л. Место сменили вручную', kind: 'box', bold: true });
+  const l1a = node(s, { x: 520, y: 130, w: 240, h: 56, text: 'Новые файлы → новое место', kind: 'store' });
+  const l1b = node(s, { x: 520, y: 220, w: 240, h: 56, text: 'Старые остаются на старом;\nс флешки их можно унести', kind: 'box' });
+  const m1 = node(s, { x: 520, y: 330, w: 240, h: 44, text: 'М. Папку на Диске сменили', kind: 'box', bold: true });
+  const m1a = node(s, { x: 520, y: 410, w: 240, h: 56, text: 'Очистить хранилище\nв обоих местах и индекс', kind: 'store' });
+  const m1b = node(s, { x: 520, y: 500, w: 240, h: 44, text: 'Обход заново', kind: 'box' });
+  edge(s, l1, 'b', l1a, 't'); edge(s, l1a, 'b', l1b, 't');
+  edge(s, m1, 'b', m1a, 't'); edge(s, m1a, 'b', m1b, 't');
+
+  const n1 = node(s, { x: 880, y: 50, w: 220, h: 44, text: 'Н. Сети нет', kind: 'box', bold: true });
+  const n1a = node(s, { x: 880, y: 130, w: 240, h: 56, text: 'Показывать из хранилища\nто, что есть', kind: 'terminal' });
+  const n1b = node(s, { x: 880, y: 220, w: 240, h: 56, text: 'Пробовать снова;\nпогасшие ссылки обновить', kind: 'box' });
+  const p1 = node(s, { x: 880, y: 330, w: 240, h: 44, text: 'Закачка во время видео', kind: 'box', bold: true });
+  const p1a = node(s, { x: 880, y: 410, w: 300, h: 60, text: '«Закачки во время видео»\nвключено?', kind: 'decision' });
+  const p1b = node(s, { x: 760, y: 510, w: 200, h: 44, text: 'Качать как обычно', kind: 'box' });
+  const p1c = node(s, { x: 1000, y: 510, w: 220, h: 56, text: 'Стоять, пока видео на экране;\nснимки качать всегда', kind: 'box' });
+  edge(s, n1, 'b', n1a, 't'); edge(s, n1a, 'b', n1b, 't');
+  edge(s, p1, 'b', p1a, 't');
+  edge(s, p1a, 'l', p1b, 't', 'да', [[760, 410]]);
+  edge(s, p1a, 'r', p1c, 't', 'нет', [[1000, 410]]);
+})();
+</script>
+</body>
+</html>

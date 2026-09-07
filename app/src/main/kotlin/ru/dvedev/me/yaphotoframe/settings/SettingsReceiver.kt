@@ -63,9 +63,15 @@ class SettingsReceiver : BroadcastReceiver() {
             "blurSampleLongSide" ->
                 raw.toIntOrNull()?.let { settings.copy(blurSampleLongSide = it) }
             "tunerEnabled" -> raw.toBooleanStrictOrNull()?.let { settings.copy(tunerEnabled = it) }
-            "cacheBudgetBytes" -> raw.toLongOrNull()?.let { settings.copy(cacheBudgetBytes = it) }
-            "cacheItemThresholdBytes" ->
-                raw.toLongOrNull()?.let { settings.copy(cacheItemThresholdBytes = it) }
+            "storageVolumeUuid", "externalStorageUuid" -> settings.copy(storageVolumeUuid = raw)
+            "storageBytes" -> raw.toLongOrNull()?.let { settings.copy(storageBytes = it) }
+            "storageByFree" -> raw.toBooleanStrictOrNull()?.let { settings.copy(storageByFree = it) }
+            "storageReserveBytes", "externalReserveBytes" ->
+                raw.toLongOrNull()?.let { settings.copy(storageReserveBytes = it) }
+            "minStorePhotoBytes" -> raw.toLongOrNull()?.let { settings.copy(minStorePhotoBytes = it) }
+            "minStoreVideoBytes" -> raw.toLongOrNull()?.let { settings.copy(minStoreVideoBytes = it) }
+            "maxFileBytes", "videoMaxSizeBytes" -> raw.toLongOrNull()?.let { settings.copy(maxFileBytes = it) }
+            "networkBps" -> raw.toLongOrNull()?.let { settings.copy(networkBps = it) }
             "prefetchCount" -> raw.toIntOrNull()?.let { settings.copy(prefetchCount = it) }
             "indexRefreshIntervalMillis" ->
                 raw.toLongOrNull()?.let { settings.copy(indexRefreshIntervalMillis = it) }
@@ -76,15 +82,6 @@ class SettingsReceiver : BroadcastReceiver() {
                 raw.toLongOrNull()?.let { settings.copy(videoMaxDurationMillis = it) }
             "videoSoundEnabled" ->
                 raw.toBooleanStrictOrNull()?.let { settings.copy(videoSoundEnabled = it) }
-            "videoMaxSizeBytes" ->
-                raw.toLongOrNull()?.let { settings.copy(videoMaxSizeBytes = it) }
-            "streamBufferBytes" ->
-                raw.toLongOrNull()?.let { settings.copy(streamBufferBytes = it) }
-            "streamMaxBitrateBps" ->
-                raw.toLongOrNull()?.let { settings.copy(streamMaxBitrateBps = it) }
-            "externalStorageUuid" -> settings.copy(externalStorageUuid = raw)
-            "externalReserveBytes" ->
-                raw.toLongOrNull()?.let { settings.copy(externalReserveBytes = it) }
             "pairPortraits" ->
                 raw.toBooleanStrictOrNull()?.let { settings.copy(pairPortraits = it) }
             "freshnessWindowDays" ->

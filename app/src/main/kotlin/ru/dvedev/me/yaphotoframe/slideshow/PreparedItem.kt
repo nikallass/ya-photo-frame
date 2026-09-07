@@ -84,12 +84,6 @@ class FramePreparer(
     private val settings: () -> FrameSettings,
     /** Мельче скольких пикселей по длинной стороне снимок не показывать; ноль — всё. */
     private val minLongSide: () -> Int = { 0 },
-    /**
-     * Начало ролика, идущего потоком, обычным файлом — ради его первого кадра;
-     * null — не достать, тогда постером будет копия с Диска. Файл временный,
-     * после разбора удаляется здесь.
-     */
-    private val streamHead: suspend (MediaItem, Delivery.Streamed) -> File? = { _, _ -> null },
 ) {
     suspend fun prepare(item: MediaItem): PreparedItem = withContext(Dispatchers.IO) {
         when (item.kind) {
@@ -146,13 +140,9 @@ class FramePreparer(
     private suspend fun posterFor(item: MediaItem, delivery: Delivery): Bitmap {
         val frame = when (delivery) {
             is Delivery.Local -> firstFrame { it.setDataSource(delivery.file.path) }
-            is Delivery.Streamed -> streamHead(item, delivery)?.let { head ->
-                try {
-                    firstFrame { it.setDataSource(head.path) }
-                } finally {
-                    head.delete()
-                }
-            }
+            // Потоковое видео целиком не лежит нигде; за первым кадром в сеть
+            // не ходим — декодер метаданных с сетью внутри однажды повис.
+            is Delivery.Streamed -> null
         }
         if (frame != null) return frame
         if (item.preview == null) {

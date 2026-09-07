@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.view.TextureView
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.C
 import androidx.media3.common.Format
@@ -14,7 +15,6 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.LoadControl
-import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import ru.dvedev.me.yaphotoframe.cache.Delivery
 
 /**
@@ -113,17 +113,7 @@ class VideoPlayback(private val context: Context) {
                     onFailed(error)
                 }
             })
-            val cache = (delivery as? Delivery.Streamed)?.cacheKey?.let { StreamCache.current() }
-            if (cache != null && delivery is Delivery.Streamed) {
-                // Поток — через буфер: начало ролика туда подкачано заранее, а
-                // продолжение ложится по ходу и пригодится при листании назад.
-                val item = MediaItem.Builder().setUri(uri).setCustomCacheKey(delivery.cacheKey).build()
-                setMediaSource(
-                    ProgressiveMediaSource.Factory(StreamCache.dataSourceFactory(cache)).createMediaSource(item),
-                )
-            } else {
-                setMediaItem(MediaItem.fromUri(uri))
-            }
+            setMediaItem(MediaItem.fromUri(uri))
             prepare()
             playWhenReady = true
         }
@@ -152,6 +142,20 @@ class VideoPlayback(private val context: Context) {
         .build()
 
     /** Есть ли декодер, который заявляет поддержку профиля и уровня ролика. */
+    /**
+     * Берёт ли декодер кодек по строке из заголовка файла (`hvc1.2.4.L153.B0`,
+     * `avc1.640028`) — до закачки, чтобы не качать то, что не покажется.
+     * Неизвестный кодек считается годным: плеер сам скажет, если нет.
+     */
+    fun decodable(codec: String): Boolean {
+        val mime = when {
+            codec.startsWith("hvc1") || codec.startsWith("hev1") -> MimeTypes.VIDEO_H265
+            codec.startsWith("avc1") || codec.startsWith("avc3") -> MimeTypes.VIDEO_H264
+            else -> return true
+        }
+        return decodable(Format.Builder().setSampleMimeType(mime).setCodecs(codec).build())
+    }
+
     private fun decodable(format: Format): Boolean {
         val mime = format.sampleMimeType ?: return true
         val infos = try {

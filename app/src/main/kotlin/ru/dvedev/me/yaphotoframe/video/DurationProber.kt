@@ -13,8 +13,11 @@ import java.io.IOException
  * вызывающий по исключению: ошибка сети бросается, а неразобранный
  * контейнер возвращает null молча.
  */
+/** Что рамка узнаёт из заголовка видео: длительность и кодек. */
+data class VideoHeader(val durationMillis: Long, val codec: String?)
+
 fun interface DurationProber {
-    suspend fun probe(url: String, sizeBytes: Long): Long?
+    suspend fun probe(url: String, sizeBytes: Long): VideoHeader?
 
     companion object {
         val NONE = DurationProber { _, _ -> null }
@@ -24,12 +27,12 @@ fun interface DurationProber {
 /** Замер range-запросами: по 64 КБ с начала и, если `moov` в конце, с его смещения. */
 class HttpDurationProber(private val http: OkHttpClient) : DurationProber {
 
-    override suspend fun probe(url: String, sizeBytes: Long): Long? = withContext(Dispatchers.IO) {
+    override suspend fun probe(url: String, sizeBytes: Long): VideoHeader? = withContext(Dispatchers.IO) {
         var offset = 0L
         repeat(MAX_HOPS) {
             val chunk = read(url, offset, sizeBytes)
             when (val outcome = Mp4Duration.scan(chunk, offset, sizeBytes)) {
-                is Mp4Duration.Outcome.Found -> return@withContext outcome.millis
+                is Mp4Duration.Outcome.Found -> return@withContext VideoHeader(outcome.millis, outcome.codec)
                 is Mp4Duration.Outcome.MoovAt -> offset = outcome.offset
                 Mp4Duration.Outcome.Unknown -> return@withContext null
             }

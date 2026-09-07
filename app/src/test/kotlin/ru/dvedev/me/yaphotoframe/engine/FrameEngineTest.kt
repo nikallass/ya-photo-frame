@@ -18,12 +18,13 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
-import ru.dvedev.me.yaphotoframe.cache.CachePolicy
 import ru.dvedev.me.yaphotoframe.cache.Delivery
 import ru.dvedev.me.yaphotoframe.cache.MediaCache
 import ru.dvedev.me.yaphotoframe.cache.MediaFetcher
-import ru.dvedev.me.yaphotoframe.cache.ArchiveStore
+import ru.dvedev.me.yaphotoframe.cache.NetworkGauge
+import ru.dvedev.me.yaphotoframe.cache.Storage
 import ru.dvedev.me.yaphotoframe.video.DurationProber
+import ru.dvedev.me.yaphotoframe.video.VideoHeader
 import ru.dvedev.me.yaphotoframe.library.FolderIndexStore
 import ru.dvedev.me.yaphotoframe.library.LibraryStore
 import ru.dvedev.me.yaphotoframe.media.FolderSelection
@@ -51,7 +52,12 @@ class FrameEngineTest {
     private lateinit var server: MockWebServer
     private lateinit var indexFile: File
     private lateinit var cacheDirectory: File
-    private var policy = CachePolicy(prefetchCount = LOOKAHEAD)
+
+    /** Объём хранилища: гигабайт — лёгкое видео помещается, огромное нет. */
+    private var capacity: Storage.Capacity = Storage.Capacity.Fixed(1L shl 30)
+
+    /** Закачки видео срываются: подставной сервер отвечает ошибкой на файлы. */
+    private var downloadsFail = false
 
     /** Пути, для которых сервер отдаёт ответ. Тест может убрать любой из них. */
     private val available = linkedMapOf(
@@ -80,7 +86,8 @@ class FrameEngineTest {
                     }
 
                     url.encodedPath.startsWith("/file/") ->
-                        bytes(url.pathSegments.last().toInt())
+                        if (downloadsFail) MockResponse().setResponseCode(500)
+                        else bytes(url.pathSegments.last().toInt())
 
                     url.encodedPath.startsWith("/preview/") -> when {
                         offline -> MockResponse().setResponseCode(503)
@@ -119,8 +126,12 @@ class FrameEngineTest {
         return MockResponse().setBody(fixture(page))
     }
 
+    /** Все движки теста — чтобы остановить их закачки до остановки сервера. */
+    private val engines = mutableListOf<FrameEngine>()
+
     @After
     fun tearDown() {
+        engines.forEach { it.close() }
         server.shutdown()
     }
 
@@ -337,8 +348,16 @@ class FrameEngineTest {
         val engine = library(includeVideo = true)
         engine.sync()
 
-        val seen = buildSet { repeat(12) { add(checkNotNull(engine.advance()).name) } }
-        assertTrue("ролики появились", seen.any { it.endsWith(".mp4") })
+        // Видео помещается в хранилище — качается, и только потом выходит на
+        // экран; подготовка идёт после каждого кадра, как в заставке.
+        val seen = buildSet {
+            repeat(12) {
+                engine.prefetch()
+                engine.awaitDownload()
+                add(checkNotNull(engine.advance()).name)
+            }
+        }
+        assertTrue("видео появились: $seen", seen.any { it.endsWith(".mp4") })
     }
 
     @Test
@@ -356,10 +375,10 @@ class FrameEngineTest {
         )
     }
 
-    // ── кэш и предзагрузка ──────────────────────────────────────────────────
+    // ── хранилище и предзагрузка ────────────────────────────────────────────
 
     @Test
-    fun `предзагрузка кладёт в кэш ближайшие кадры целиком`() = runTest {
+    fun `предзагрузка кладёт в хранилище ближайшие кадры целиком`() = runTest {
         switchToCacheFolder()
         val engine = library(pageLimit = 50)
         engine.sync()
@@ -375,7 +394,7 @@ class FrameEngineTest {
         assertEquals(
             "и всё это лежит на диске",
             (LOOKAHEAD * (BYTES_PER_MICRO + BYTES_PER_FULL)).toLong(),
-            engine.cacheState().usedBytes,
+            engine.storageState().usedBytes,
         )
     }
 
@@ -393,121 +412,19 @@ class FrameEngineTest {
     }
 
     @Test
-    fun `тяжёлое видео не занимает место, а отдаётся потоком`() = runTest {
-        switchToCacheFolder()
-        val engine = library(pageLimit = 50, includeVideo = true)
-        engine.sync()
-
-        val huge = engine.entries.single { it.item.name == "огромное.mov" }.item
-        val light = engine.entries.single { it.item.name == "лёгкое.mp4" }.item
-
-        assertTrue("шесть гигабайт мимо кэша", engine.deliver(huge) is Delivery.Streamed)
-        assertTrue("двадцать мегабайт оседают на устройстве", engine.deliver(light) is Delivery.Local)
-    }
-
-    @Test
-    fun `тяжёлый ролик ждёт в очереди, пока его начало не подкачано, а потом идёт потоком`() = runTest {
-        switchToCacheFolder()
-        val primer = FakePrimer()
-        val engine = library(pageLimit = 50, includeVideo = true, primer = primer, primeBudget = 200L * 1024 * 1024)
-        engine.sync()
-
-        val shownBefore = List(4) { checkNotNull(engine.advance()).name }
-        assertTrue("на экран без подкачки не идёт: $shownBefore", "огромное.mov" !in shownBefore)
-        val queued = engine.upcoming().map { it.name }
-        assertTrue("но ждёт в очереди: $queued", "огромное.mov" in queued)
-
-        engine.prefetch()
-        engine.awaitPriming()
-
-        val huge = engine.entries.single { it.item.name == "огромное.mov" }.item
-        assertEquals("подкачано столько, сколько влезает в буфер", 136L * 1024 * 1024, primer.primed[huge.path])
-        val shownAfter = buildList { repeat(12) { engine.advance()?.let { add(it.name) } } }
-        assertTrue("подкачанный вышел на экран: $shownAfter", "огромное.mov" in shownAfter)
-        val delivery = engine.deliver(huge)
-        assertTrue("и идёт потоком, а не с диска", delivery is Delivery.Streamed)
-        assertEquals("под своим ключом в буфере", huge.path, (delivery as Delivery.Streamed).cacheKey)
-        assertTrue("в общий кэш ничего не легло", cachedNames().none { it.endsWith("-orig") })
-    }
-
-    @Test
-    fun `следующий ролик не подкачивается, пока подкачанный не показан`() = runTest {
-        switchToCacheFolder()
-        // Порог опущен: оба ролика идут потоком и оба хотят в буфер.
-        policy = policy.copy(itemThresholdBytes = 1024)
-        val primer = FakePrimer()
-        val engine = library(pageLimit = 50, includeVideo = true, primer = primer, primeBudget = 200L * 1024 * 1024)
-        engine.sync()
-
-        engine.prefetch()
-        engine.awaitPriming()
-        assertEquals("подкачан один: " + primer.primed.keys, 1, primer.primed.size)
-        val first = primer.primed.keys.single()
-
-        engine.prefetch()
-        engine.awaitPriming()
-        assertEquals("второй ждёт, буфер занят первым", 1, primer.primed.size)
-
-        // Первый вышел на экран — очередь подкачки свободна.
-        val shown = buildList { repeat(8) { engine.advance()?.let { add(it.path) } } }
-        assertTrue("подкачанный показан: $shown", first in shown)
-        engine.prefetch()
-        engine.awaitPriming()
-        assertEquals("теперь подкачан и второй: " + primer.primed.keys, 2, primer.primed.size)
-    }
-
-    @Test
-    fun `без буфера тяжёлый ролик идёт потоком сразу, ничего не дожидаясь`() = runTest {
-        switchToCacheFolder()
-        val engine = library(pageLimit = 50, includeVideo = true, primer = FakePrimer(), primeBudget = 0L)
-        engine.sync()
-
-        val shown = buildList { repeat(8) { engine.advance()?.let { add(it.name) } } }
-        assertTrue("ролик показан без ожидания: $shown", "огромное.mov" in shown)
-    }
-
-    @Test
-    fun `сорвавшаяся подкачка не держит ролик в очереди вечно`() = runTest {
-        switchToCacheFolder()
-        val primer = FakePrimer(fail = true)
-        val engine = library(pageLimit = 50, includeVideo = true, primer = primer, primeBudget = 200L * 1024 * 1024)
-        engine.sync()
-
-        engine.prefetch()
-        engine.awaitPriming()
-
-        val shown = buildList { repeat(8) { engine.advance()?.let { add(it.name) } } }
-        assertTrue("ролик всё же показан, потоком как есть: $shown", "огромное.mov" in shown)
-    }
-
-    @Test
-    fun `порог кэширования берётся из настроек, а не из кода`() = runTest {
-        switchToCacheFolder()
-        val engine = library(pageLimit = 50, includeVideo = true)
-        engine.sync()
-        val light = engine.entries.single { it.item.name == "лёгкое.mp4" }.item
-
-        assertTrue(engine.deliver(light) is Delivery.Local)
-
-        // Опустили порог ниже размера ролика — и он сразу пошёл потоком.
-        policy = policy.copy(itemThresholdBytes = 1024)
-        assertTrue(engine.deliver(light) is Delivery.Streamed)
-    }
-
-    @Test
-    fun `при нехватке бюджета кэш ужимается до бюджета`() = runTest {
+    fun `при нехватке объёма хранилище ужимается до объёма`() = runTest {
         switchToCacheFolder()
         val engine = library(pageLimit = 50)
         engine.sync()
 
-        // Бюджета хватает ровно на три снимка из пяти подготовленных.
-        policy = policy.copy(budgetBytes = 3L * (BYTES_PER_MICRO + BYTES_PER_FULL))
+        // Объёма хватает ровно на три снимка из пяти подготовленных.
+        capacity = Storage.Capacity.Fixed(3L * (BYTES_PER_MICRO + BYTES_PER_FULL))
         val outcome = engine.prefetch()
 
         assertTrue("что-то вытеснено", outcome.evicted > 0)
         assertTrue(
-            "кэш уложился в бюджет: " + engine.cacheState().usedBytes,
-            engine.cacheState().usedBytes <= policy.budgetBytes,
+            "хранилище уложилось в объём: " + engine.storageState().usedBytes,
+            engine.storageState().usedBytes <= 3L * (BYTES_PER_MICRO + BYTES_PER_FULL),
         )
     }
 
@@ -793,6 +710,16 @@ class FrameEngineTest {
         assertTrue(outcomes.isNotEmpty())
     }
 
+    private var storage: Storage? = null
+
+    /** Хранилище теста — в отдельной папке, с объёмом из [capacity]. */
+    private fun storage(): Storage = storage ?: Storage(
+        root = cacheDirectory, place = Storage.Place.TvMemory, capacity = { capacity }, clock = { now },
+    ).also { storage = it }
+
+    private val gauge = NetworkGauge()
+    private val events = mutableListOf<DownloadEvent>()
+
     private fun library(
         pageLimit: Int = PAGE_LIMIT,
         seed: Int = 1,
@@ -801,12 +728,13 @@ class FrameEngineTest {
         measure: (MediaItem, File) -> Int? = { _, _ -> null },
         tuning: PlaylistTuning = PlaylistTuning(),
         selection: () -> FolderSelection = { FolderSelection.ALL },
-        primer: StreamPrimer = StreamPrimer.NONE,
-        primeBudget: Long = 0L,
         prober: DurationProber = DurationProber.NONE,
-        channelBps: Long = 0L,
-        maxVideoDuration: Long = 0L,
-        external: () -> ExternalStore? = { null },
+        networkBps: Long = 0L,
+        maxFileBytes: Long = 0L,
+        minStorePhotoBytes: Long = 0L,
+        minStoreVideoBytes: Long = 0L,
+        decodable: (String) -> Boolean = { true },
+        storage: () -> Storage = ::storage,
     ) = FrameEngine(
         source = YandexPublicDiskSource(
             publicKey = "https://disk.yandex.ru/d/TEST",
@@ -817,111 +745,263 @@ class FrameEngineTest {
         ),
         selection = selection,
         store = LibraryStore(indexFile),
-        folderStore = FolderIndexStore(File(cacheDirectory, "folders.json")),
-        cache = cache(),
-        fetcher = MediaFetcher(OkHttpClient(), cache()),
-        policy = { policy },
+        folderStore = FolderIndexStore(File(temporaryFolder.root, "folders.json")),
+        storage = storage,
+        scratch = MediaCache(File(temporaryFolder.root, "scratch"), { SCRATCH_BYTES }, { now }),
+        fetcher = MediaFetcher(OkHttpClient()),
+        prefetchCount = { LOOKAHEAD },
         clock = { now },
         random = Random(seed),
         includeVideo = { includeVideo },
         minPhotoLongSide = minLongSide,
         measure = measure,
         tuning = { tuning },
-        primer = primer,
-        primeBudgetBytes = { primeBudget },
         prober = prober,
-        channelBps = { channelBps },
-        maxVideoDurationMillis = { maxVideoDuration },
-        external = external,
-    )
+        networkBps = { networkBps },
+        maxFileBytes = { maxFileBytes },
+        minStorePhotoBytes = { minStorePhotoBytes },
+        minStoreVideoBytes = { minStoreVideoBytes },
+        gauge = gauge,
+        decodable = decodable,
+        onDownload = { events += it },
+    ).also { engines += it }
 
-    /** Подставной замер: длительность по размеру файла — ссылки на подставном сервере безлики. */
-    private fun prober(vararg bySize: Pair<Long, Long?>) = DurationProber { _, size ->
+    /** Подставной замер: заголовок по размеру файла — ссылки на подставном сервере безлики. */
+    private fun prober(vararg bySize: Pair<Long, VideoHeader?>) = DurationProber { _, size ->
         bySize.toMap()[size]
     }
 
-    /** Носитель в отдельной папке: качает с того же подставного сервера. */
-    private fun archive(): ArchiveStore {
-        val directory = File(temporaryFolder.root, "archive").apply { mkdirs() }
-        val cache = MediaCache(directory, { Long.MAX_VALUE }, { now })
-        return ArchiveStore(cache, MediaFetcher(OkHttpClient(), cache))
-    }
+    private fun header(millis: Long, codec: String? = null) = VideoHeader(millis, codec)
 
     private suspend fun shown(engine: FrameEngine, times: Int = 10): List<String> =
         buildList { repeat(times) { engine.advance()?.let { add(it.name) } } }
 
+    private fun videoFile(name: String) = File(cacheDirectory, "videos/$name")
+
+    // ── видео: в хранилище, потоком, пропуск ────────────────────────────────
+
+    // Лёгкое: 20 МБ за 10 с — 17 Мбит/с; огромное: 6 ГБ за 100 с — 480 Мбит/с.
+    private val headers = arrayOf(LIGHT_BYTES to header(10_000L), HUGE_BYTES to header(100_000L))
+
     @Test
-    fun `ролик тяжелее канала без носителя пропускается, лёгкий идёт потоком`() = runTest {
+    fun `видео, которое помещается, ждёт закачки в хранилище, а потом играет с диска`() = runTest {
         switchToCacheFolder()
-        policy = policy.copy(itemThresholdBytes = 1024)
-        // Лёгкий: 20 МБ за 10 с — 17 Мбит/с; огромный: 6 ГБ за 100 с — 480 Мбит/с.
-        val engine = library(
-            pageLimit = 50, includeVideo = true, channelBps = 50_000_000L,
-            prober = prober(20_971_520L to 10_000L, 6_000_000_000L to 100_000L),
-        )
+        val engine = library(pageLimit = 50, includeVideo = true, prober = prober(*headers))
+        engine.sync()
+        engine.awaitProbing()
+
+        val before = shown(engine, 4)
+        assertTrue("до закачки на экран не идёт: $before", "лёгкое.mp4" !in before)
+        assertTrue("но ждёт в очереди", engine.upcoming().any { it.name == "лёгкое.mp4" })
+        assertEquals("и числится ждущим", 1, engine.waitingCount())
+
+        engine.prefetch()
+        engine.awaitDownload()
+
+        assertTrue("лежит в хранилище деревом как на Диске", videoFile("лёгкое.mp4").isFile)
+        val after = shown(engine, 12)
+        assertTrue("скачанное показано: $after", "лёгкое.mp4" in after)
+        val light = engine.entries.single { it.item.name == "лёгкое.mp4" }.item
+        val requests = server.requestCount
+        val delivery = engine.deliver(light)
+        assertTrue("играет с диска", delivery is Delivery.Local)
+        assertEquals(videoFile("лёгкое.mp4"), (delivery as Delivery.Local).file)
+        assertEquals("второй раз не качается", requests, server.requestCount)
+        assertTrue("о закачке сообщено", events.any { it is DownloadEvent.Finished && it.item.name == "лёгкое.mp4" })
+    }
+
+    @Test
+    fun `видео, которое не помещается, идёт потоком, если сеть тянет, иначе пропускается`() = runTest {
+        switchToCacheFolder()
+        // Объём меньше любого видео: оба не помещаются даже после вытеснения.
+        capacity = Storage.Capacity.Fixed(1L shl 20)
+        val engine = library(pageLimit = 50, includeVideo = true, prober = prober(*headers), networkBps = 50_000_000L)
         engine.sync()
         engine.awaitProbing()
         engine.prefetch()
 
         val names = shown(engine, 12)
-        assertTrue("лёгкий показан: $names", "лёгкое.mp4" in names)
-        assertTrue("огромный — нет: $names", "огромное.mov" !in names)
-        assertEquals("и он числится ждущим носителя", 1, engine.waitingForStorage())
+        assertTrue("лёгкое (17 Мбит/с) показано потоком: $names", "лёгкое.mp4" in names)
+        assertTrue("огромное (480 Мбит/с) пропущено: $names", "огромное.mov" !in names)
+        assertTrue("и в очереди его нет", engine.upcoming().none { it.name == "огромное.mov" })
         val light = engine.entries.single { it.item.name == "лёгкое.mp4" }
         assertEquals("длительность запомнена", 10_000L, light.durationMillis)
+        assertTrue(engine.streamed(light.item))
         assertTrue(engine.deliver(light.item) is Delivery.Streamed)
+        assertFalse("в хранилище не легло", videoFile("лёгкое.mp4").exists())
     }
 
     @Test
-    fun `пока длительность не измерена, ролик ждёт в очереди, а неразобранный считается тяжёлым`() = runTest {
+    fun `пока сеть не измерена, непомещающееся видео пропускается, а замер по закачкам решает`() = runTest {
         switchToCacheFolder()
-        policy = policy.copy(itemThresholdBytes = 1024)
-        // Замер стоит на воротах: пока они закрыты, длительности нет ни у кого.
+        capacity = Storage.Capacity.Fixed(1L shl 20)
+        val engine = library(pageLimit = 50, includeVideo = true, prober = prober(*headers))
+        engine.sync()
+        engine.awaitProbing()
+        val light = engine.entries.single { it.item.name == "лёгкое.mp4" }.item
+
+        assertNull("замеров нет", engine.measuredNetworkBps())
+        assertTrue("сеть считается медленной — пропуск", "лёгкое.mp4" !in shown(engine, 12))
+
+        // Три закачки по 100 МБ за 10 с — 80 Мбит/с.
+        repeat(3) { gauge.record(100L shl 20, 10_000L) }
+        assertEquals(engine.measuredNetworkBps(), engine.effectiveNetworkBps())
+        assertTrue("теперь тянет — потоком", engine.streamed(light))
+        assertTrue("лёгкое.mp4" in shown(engine, 12))
+    }
+
+    @Test
+    fun `«не хранить легче» — снимок во времянку, видео потоком`() = runTest {
+        switchToCacheFolder()
+        val engine = library(
+            pageLimit = 50, includeVideo = true, prober = prober(*headers), networkBps = 50_000_000L,
+            // Снимки по 900 КБ, лёгкое видео 20 МБ — оба легче порогов.
+            minStorePhotoBytes = 1L shl 20, minStoreVideoBytes = 50L shl 20,
+        )
+        engine.sync()
+        engine.awaitProbing()
+        engine.prefetch()
+
+        assertTrue("заранее ничего не качается: в хранилище снимков нет", cachedNames().isEmpty())
+        val item = engine.entries.first { it.item.kind == MediaKind.PHOTO }.item
+        assertTrue("снимок к показу качается во времянку", engine.previewFile(item, PreviewSize.FULL).isFile)
+        val scratch = File(temporaryFolder.root, "scratch").listFiles().orEmpty().filter { it.isFile }
+        assertTrue("и лежит там, а не в хранилище", scratch.isNotEmpty() && cachedNames().isEmpty())
+        val light = engine.entries.single { it.item.name == "лёгкое.mp4" }.item
+        assertTrue("видео легче порога — потоком", engine.deliver(light) is Delivery.Streamed)
+        assertFalse(videoFile("лёгкое.mp4").exists())
+    }
+
+    @Test
+    fun `файл тяжелее порога пропускается, не качаясь`() = runTest {
+        switchToCacheFolder()
+        val engine = library(pageLimit = 50, includeVideo = true, prober = prober(*headers), maxFileBytes = 10L shl 20)
+        engine.sync()
+        engine.prefetch()
+        engine.awaitDownload()
+
+        val names = shown(engine, 20)
+        assertTrue("видео тяжелее 10 МБ не показываются: $names", names.none { it.endsWith(".mp4") || it.endsWith(".mov") })
+        assertTrue("снимки по 900 КБ — показываются", names.isNotEmpty())
+        assertFalse("и не качаются", videoFile("лёгкое.mp4").exists())
+        assertTrue("в очереди видео нет", engine.upcoming().none { it.kind == MediaKind.VIDEO })
+    }
+
+    @Test
+    fun `видео с кодеком не по зубам декодеру помечается до закачки`() = runTest {
+        switchToCacheFolder()
+        val engine = library(
+            pageLimit = 50, includeVideo = true,
+            prober = prober(LIGHT_BYTES to header(10_000L, "hvc1.2.4.L153.B0.10bit"), HUGE_BYTES to header(100_000L, "avc1.640028")),
+            decodable = { !it.startsWith("hvc1.2") },
+        )
+        engine.sync()
+        engine.awaitProbing()
+        engine.prefetch()
+        engine.awaitDownload()
+
+        val light = engine.entries.single { it.item.name == "лёгкое.mp4" }
+        assertTrue("помечено недекодируемым", light.undecodable)
+        assertEquals("кодек запомнен", "hvc1.2.4.L153.B0.10bit", light.codec)
+        assertTrue("сообщено", events.any { it is DownloadEvent.Undecodable && it.item.name == "лёгкое.mp4" })
+        assertFalse("не качалось", videoFile("лёгкое.mp4").exists())
+        assertTrue("и не показывается", "лёгкое.mp4" !in shown(engine, 20))
+        assertEquals(1, engine.indexState().undecodable)
+    }
+
+    @Test
+    fun `пока заголовок не прочитан, видео ждёт в очереди, а неразобранное без места пропускается`() = runTest {
+        switchToCacheFolder()
+        capacity = Storage.Capacity.Fixed(1L shl 20)
         val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
         val engine = library(
-            pageLimit = 50, includeVideo = true, channelBps = 50_000_000L,
+            pageLimit = 50, includeVideo = true, networkBps = 50_000_000L,
             prober = DurationProber { _, _ -> gate.await(); null },
         )
         engine.sync()
 
         val before = shown(engine, 12)
-        assertTrue("без замера ролики не выходят: $before", before.none { it.endsWith(".mp4") || it.endsWith(".mov") })
-        assertTrue("но один ждёт в очереди", engine.upcoming().any { it.kind == MediaKind.VIDEO })
+        assertTrue("без заголовка видео не выходят: $before", before.none { it.endsWith(".mp4") || it.endsWith(".mov") })
+        assertTrue("но одно ждёт в очереди", engine.upcoming().any { it.kind == MediaKind.VIDEO })
 
         gate.complete(Unit)
         engine.awaitProbing()
         engine.prefetch()
         val entries = engine.entries.filter { it.item.kind == MediaKind.VIDEO }
-        assertTrue("замер прошёл, заголовок не разобрался — ноль", entries.all { it.durationMillis == 0L })
-        assertEquals("оба теперь ждут носителя", 2, engine.waitingForStorage())
-        assertTrue("и в очереди их нет", engine.upcoming().none { it.kind == MediaKind.VIDEO })
+        assertTrue("заголовок не разобрался — ноль", entries.all { it.durationMillis == 0L })
+        assertTrue("битрейт неизвестен, места нет — оба пропущены", engine.upcoming().none { it.kind == MediaKind.VIDEO })
     }
 
     @Test
-    fun `тяжёлый ролик, чья показываемая часть помещается в подкачку, идёт потоком`() = runTest {
+    fun `неразобранный заголовок не мешает видео, которое помещается`() = runTest {
         switchToCacheFolder()
-        // 6 ГБ за 100 с; показываем 2 с — 120 МБ, а в буфере после запаса 136 МБ.
-        val engine = library(
-            pageLimit = 50, includeVideo = true, channelBps = 50_000_000L, maxVideoDuration = 2_000L,
-            primer = FakePrimer(), primeBudget = 200L * 1024 * 1024,
-            prober = prober(6_000_000_000L to 100_000L),
-        )
+        val engine = library(pageLimit = 50, includeVideo = true, prober = DurationProber { _, _ -> null })
         engine.sync()
-        val huge = engine.entries.single { it.item.name == "огромное.mov" }.item
+        engine.awaitProbing()
+        engine.prefetch()
+        engine.awaitDownload()
 
-        assertTrue(engine.deliver(huge) is Delivery.Streamed)
-        assertEquals(0, engine.waitingForStorage())
+        assertTrue("лёгкое скачалось, хоть битрейт и неизвестен", videoFile("лёгкое.mp4").isFile)
+    }
+
+    @Test
+    fun `при нехватке места вытесняется сначала видео, потом старые снимки`() = runTest {
+        switchToCacheFolder()
+        val engine = library(pageLimit = 50, includeVideo = true, prober = prober(*headers))
+        engine.sync()
+        engine.prefetch()
+        engine.awaitDownload()
+        assertTrue(videoFile("лёгкое.mp4").isFile)
+        val photosBefore = cachedNames().size
+        assertTrue(photosBefore > 0)
+
+        capacity = Storage.Capacity.Fixed(2L * (BYTES_PER_MICRO + BYTES_PER_FULL))
+        val outcome = engine.prefetch()
+
+        assertTrue(outcome.evicted > 0)
+        assertFalse("видео ушло первым", videoFile("лёгкое.mp4").exists())
+        assertTrue("снимки остались, сколько влезло", cachedNames().isNotEmpty())
+    }
+
+    @Test
+    fun `сорвавшаяся закачка не держит видео в очереди — оно идёт потоком`() = runTest {
+        switchToCacheFolder()
+        downloadsFail = true
+        val engine = library(pageLimit = 50, includeVideo = true, prober = prober(*headers), networkBps = 50_000_000L)
+        engine.sync()
+        engine.awaitProbing()
+        engine.prefetch()
+        engine.awaitDownload()
+
+        assertTrue("о срыве сообщено", events.any { it is DownloadEvent.Failed })
+        val light = engine.entries.single { it.item.name == "лёгкое.mp4" }.item
+        assertTrue("второй раз не пробуем, идёт потоком", engine.deliver(light) is Delivery.Streamed)
+    }
+
+    @Test
+    fun `пока на экране видео, закачка не начинается`() = runTest {
+        switchToCacheFolder()
+        val engine = library(pageLimit = 50, includeVideo = true, prober = prober(*headers))
+        engine.sync()
+
+        engine.holdDownloads(true)
+        engine.prefetch()
+        engine.awaitDownload()
+        assertFalse("видео на экране — ничего не качается", videoFile("лёгкое.mp4").exists())
+        assertTrue("но ждёт в очереди", engine.upcoming().any { it.name == "лёгкое.mp4" })
+        assertTrue("снимки при этом качаются", cachedNames().isNotEmpty())
+
+        engine.holdDownloads(false)
+        engine.prefetch()
+        engine.awaitDownload()
+        assertTrue("после видео закачка пошла", videoFile("лёгкое.mp4").isFile)
     }
 
     @Test
     fun `замеренная длительность переживает переобход`() = runTest {
         switchToCacheFolder()
-        val engine = library(
-            pageLimit = 50, includeVideo = true, channelBps = 50_000_000L,
-            prober = prober(6_000_000_000L to 100_000L),
-        )
+        val engine = library(pageLimit = 50, includeVideo = true, prober = prober(*headers))
         engine.sync()
-        engine.prefetch()
         engine.awaitProbing()
         val huge = engine.entries.single { it.item.name == "огромное.mov" }.item
         assertTrue("замерено", engine.bitrateOf(huge.path) != null)
@@ -931,124 +1011,59 @@ class FrameEngineTest {
     }
 
     @Test
-    fun `пока на экране ролик, закачка на флешку не начинается`() = runTest {
+    fun `флешка пропала — хранилище в памяти телевизора, вернулась — файлы на месте`() = runTest {
         switchToCacheFolder()
-        val store = archive()
-        val engine = library(
-            pageLimit = 50, includeVideo = true, channelBps = 50_000_000L,
-            prober = prober(6_000_000_000L to 100_000L), external = { store },
-        )
-        engine.sync()
-
-        engine.holdDownloads(all = true)
-        engine.prefetch()
-        engine.awaitArchiving()
-        assertTrue("ролик на экране — на флешку ничего не качается", !store.has("/огромное.mov"))
-        assertTrue("но ждёт в очереди", engine.upcoming().any { it.name == "огромное.mov" })
-
-        engine.holdDownloads(all = false, priming = true)
-        engine.prefetch()
-        engine.awaitArchiving()
-        assertTrue("удержана только подкачка — флешка качается", store.has("/огромное.mov"))
-
-        engine.holdDownloads(all = false)
-        engine.prefetch()
-        engine.awaitArchiving()
-        assertTrue("после ролика закачка пошла", store.has("/огромное.mov"))
-    }
-
-    @Test
-    fun `тяжёлый ролик уезжает на носитель, ждёт закачки и идёт с него`() = runTest {
-        switchToCacheFolder()
-        val store = archive()
-        val engine = library(
-            pageLimit = 50, includeVideo = true, channelBps = 50_000_000L,
-            prober = prober(6_000_000_000L to 100_000L), external = { store },
-        )
-        engine.sync()
-
-        val before = shown(engine, 4)
-        assertTrue("до закачки на экран не идёт: $before", "огромное.mov" !in before)
-        assertTrue("но ждёт в очереди", engine.upcoming().any { it.name == "огромное.mov" })
-
-        engine.prefetch()
-        engine.awaitArchiving()
-        assertTrue("лежит на носителе под своим путём", File(temporaryFolder.root, "archive/огромное.mov").isFile)
-        assertTrue(store.has("/огромное.mov"))
-
-        val after = shown(engine, 12)
-        assertTrue("закачанный показан: $after", "огромное.mov" in after)
-        val huge = engine.entries.single { it.item.name == "огромное.mov" }.item
-        val requests = server.requestCount
-        val delivery = engine.deliver(huge)
-        assertTrue("идёт с носителя как локальный файл", delivery is Delivery.Local)
-        assertEquals(File(temporaryFolder.root, "archive/огромное.mov"), (delivery as Delivery.Local).file)
-        assertEquals("второй раз не качается", requests, server.requestCount)
-        assertEquals(0, engine.waitingForStorage())
-    }
-
-    @Test
-    fun `носитель пропал — тяжёлые пропускаются, вернулся — снова идут`() = runTest {
-        switchToCacheFolder()
-        val store = archive()
+        val flashRoot = File(temporaryFolder.root, "flash").apply { mkdirs() }
+        val flash = Storage(flashRoot, Storage.Place.Flash("AAAA-1111", "USB"), { capacity }, { now })
         var present = true
         val engine = library(
-            pageLimit = 50, includeVideo = true, channelBps = 50_000_000L,
-            prober = prober(6_000_000_000L to 100_000L), external = { if (present) store else null },
+            pageLimit = 50, includeVideo = true, prober = prober(*headers),
+            storage = { if (present) flash else storage() },
         )
         engine.sync()
         engine.prefetch()
-        engine.awaitArchiving()
+        engine.awaitDownload()
+        assertTrue("видео уехало на флешку", File(flashRoot, "videos/лёгкое.mp4").isFile)
+        assertTrue("и снимки тоже", File(flashRoot, "previews").listFiles().orEmpty().isNotEmpty())
+        val light = engine.entries.single { it.item.name == "лёгкое.mp4" }.item
 
         present = false
-        assertEquals(1, engine.waitingForStorage())
-        assertTrue("без носителя не показывается", "огромное.mov" !in shown(engine, 12))
+        assertTrue("без флешки видео снова ждёт закачки — в память телевизора", engine.waiting(light))
+        assertEquals("хранилище теперь в памяти телевизора", Storage.Place.TvMemory, engine.storageState().place)
+        engine.prefetch()
+        engine.awaitDownload()
+        assertTrue("докачалось в память телевизора", videoFile("лёгкое.mp4").isFile)
+        assertTrue("снимки показываются и без флешки", cachedNames().isNotEmpty())
 
         present = true
-        assertEquals(0, engine.waitingForStorage())
-        assertTrue("с носителем — показывается, качать заново не надо", "огромное.mov" in shown(engine, 12))
+        val delivery = engine.deliver(light)
+        assertTrue(delivery is Delivery.Local)
+        assertEquals("с флешки, качать заново не надо", File(flashRoot, "videos/лёгкое.mp4"), (delivery as Delivery.Local).file)
     }
 
     @Test
-    fun `удалённый на хранилище ролик убирается и с носителя`() = runTest {
+    fun `удалённое на Диске видео убирается и из хранилища`() = runTest {
         switchToCacheFolder()
-        val store = archive()
-        val engine = library(
-            pageLimit = 50, includeVideo = true, channelBps = 50_000_000L,
-            prober = prober(6_000_000_000L to 100_000L), external = { store },
-        )
+        val engine = library(pageLimit = 50, includeVideo = true, prober = prober(*headers))
         engine.sync()
         engine.prefetch()
-        engine.awaitArchiving()
-        assertTrue(store.has("/огромное.mov"))
+        engine.awaitDownload()
+        assertTrue(videoFile("лёгкое.mp4").isFile)
 
-        available["/"] = listOf("cache-root-without-huge.json")
+        available["/"] = listOf("cache-root-without-light.json")
         engine.sync()
 
-        assertFalse("удалили на Диске — нет и на флешке", store.has("/огромное.mov"))
+        assertFalse("удалили на Диске — нет и в хранилище", videoFile("лёгкое.mp4").exists())
     }
-
-    /** Подставной буфер потока: помнит, сколько «подкачано», сети не трогает. */
-    private class FakePrimer(private val fail: Boolean = false) : StreamPrimer {
-        val primed = mutableMapOf<String, Long>()
-        override fun primedBytes(key: String, limit: Long) = minOf(primed[key] ?: 0L, limit)
-        override fun usedBytes() = primed.values.sum()
-        override suspend fun prime(key: String, url: String, bytes: Long, onProgress: (Long) -> Unit) {
-            if (fail) throw java.io.IOException("сеть легла")
-            onProgress(bytes)
-            primed[key] = bytes
-        }
-    }
-
-    private fun cache() = MediaCache(cacheDirectory, { policy.budgetBytes }, { now })
 
     private fun switchToCacheFolder() {
         available.clear()
         available["/"] = listOf("cache-root-0.json")
     }
 
+    /** Имена копий снимков в хранилище. */
     private fun cachedNames(): List<String> =
-        cacheDirectory.listFiles().orEmpty().map { it.name }.sorted()
+        File(cacheDirectory, "previews").listFiles().orEmpty().filter { it.isFile }.map { it.name }.sorted()
 
     /** Переключает подставное хранилище на большую папку: 15 давних снимков и 5 свежих. */
     private fun switchToBulkFolder() {
@@ -1080,6 +1095,12 @@ class FrameEngineTest {
         const val BYTES_PER_ORIGINAL = 40_000
 
         const val THREE_HOURS = 3L * 60 * 60 * 1000
+
+        /** Размеры видео из фикстуры cache-root-0.json. */
+        const val LIGHT_BYTES = 20_971_520L
+        const val HUGE_BYTES = 6_000_000_000L
+
+        const val SCRATCH_BYTES = 8L * 1024 * 1024
 
         const val REAL_DOWNLOADER = "https://downloader.disk.yandex.ru"
     }

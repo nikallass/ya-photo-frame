@@ -117,8 +117,15 @@ class MediaCache(
         entries().forEach { it.delete() }
     }
 
-    private fun entries(): List<File> =
+    fun entries(): List<File> =
         directory.walkTopDown().filter { it.isFile && !it.name.endsWith(".part") }.toList()
+
+    /** Удалить файл кэша вместе с опустевшими папками над ним. */
+    fun delete(file: File): Boolean {
+        val removed = file.isFile && file.delete()
+        if (removed) pruneEmpty(file.parentFile)
+        return removed
+    }
 
     /** Прибирает недописанное, оставшееся от прерванных загрузок. */
     fun sweepLeftovers() {

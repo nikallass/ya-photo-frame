@@ -6,7 +6,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import ru.dvedev.me.yaphotoframe.Defaults
-import ru.dvedev.me.yaphotoframe.cache.CachePolicy
 import ru.dvedev.me.yaphotoframe.ui.FrameSettings
 
 /**
@@ -80,9 +79,6 @@ class SettingsStore(context: Context) {
             blurSampleLongSide = prefs.getInt(KEY_BLUR, defaults.blurSampleLongSide),
             minPhotoFraction = prefs.getFloat(KEY_MIN_PHOTO, defaults.minPhotoFraction),
             tunerEnabled = prefs.getBoolean(KEY_TUNER, defaults.tunerEnabled),
-            cacheBudgetBytes = prefs.getLong(KEY_CACHE_BUDGET, defaults.cacheBudgetBytes),
-            cacheItemThresholdBytes =
-                prefs.getLong(KEY_CACHE_THRESHOLD, defaults.cacheItemThresholdBytes),
             selectedFolders = prefs.getStringSet(KEY_FOLDERS, defaults.selectedFolders)
                 ?: defaults.selectedFolders,
             showVideo = prefs.getBoolean(KEY_VIDEO, defaults.showVideo),
@@ -90,18 +86,31 @@ class SettingsStore(context: Context) {
             videoMaxDurationMillis =
                 prefs.getLong(KEY_VIDEO_MAX, defaults.videoMaxDurationMillis),
             videoSoundEnabled = prefs.getBoolean(KEY_VIDEO_SOUND, defaults.videoSoundEnabled),
-            videoMaxSizeBytes = prefs.getLong(KEY_VIDEO_MAX_SIZE, defaults.videoMaxSizeBytes),
-            streamBufferBytes = prefs.getLong(KEY_STREAM_BUFFER, defaults.streamBufferBytes),
-            streamMaxBitrateBps = prefs.getLong(KEY_STREAM_BITRATE, defaults.streamMaxBitrateBps),
-            externalStorageUuid = prefs.getString(KEY_EXTERNAL, defaults.externalStorageUuid)
-                ?: defaults.externalStorageUuid,
-            externalReserveBytes = prefs.getLong(KEY_EXTERNAL_RESERVE, defaults.externalReserveBytes),
             pairPortraits = prefs.getBoolean(KEY_PAIRS, defaults.pairPortraits),
             freshnessWindowDays = prefs.getInt(KEY_FRESHNESS, defaults.freshnessWindowDays),
             showClock = prefs.getBoolean(KEY_CLOCK, defaults.showClock),
             pauseAutoResumeMillis = prefs.getLong(KEY_PAUSE_RESUME, defaults.pauseAutoResumeMillis),
             showDate = prefs.getBoolean(KEY_DATE, defaults.showDate),
             prefetchCount = prefs.getInt(KEY_PREFETCH, defaults.prefetchCount),
+            // Перенос с 1.3: выбранная флешка становится хранилищем «по свободному
+            // месту», иначе — память телевизора с объёмом из старых кэша и буфера.
+            storageVolumeUuid = prefs.getString(KEY_STORAGE_VOLUME, null)
+                ?: prefs.getString(KEY_OLD_EXTERNAL, defaults.storageVolumeUuid) ?: "",
+            storageBytes = if (prefs.contains(KEY_STORAGE_BYTES)) prefs.getLong(KEY_STORAGE_BYTES, defaults.storageBytes)
+            else maxOf(
+                defaults.storageBytes,
+                prefs.getLong(KEY_OLD_CACHE_BUDGET, 0L) + prefs.getLong(KEY_OLD_STREAM_BUFFER, 0L),
+            ),
+            storageByFree = if (prefs.contains(KEY_STORAGE_BY_FREE)) prefs.getBoolean(KEY_STORAGE_BY_FREE, false)
+            else !prefs.getString(KEY_OLD_EXTERNAL, "").isNullOrBlank(),
+            storageReserveBytes = prefs.getLong(
+                KEY_STORAGE_RESERVE,
+                prefs.getLong(KEY_OLD_EXTERNAL_RESERVE, defaults.storageReserveBytes),
+            ),
+            minStorePhotoBytes = prefs.getLong(KEY_MIN_STORE_PHOTO, defaults.minStorePhotoBytes),
+            minStoreVideoBytes = prefs.getLong(KEY_MIN_STORE_VIDEO, defaults.minStoreVideoBytes),
+            maxFileBytes = prefs.getLong(KEY_MAX_FILE, prefs.getLong(KEY_OLD_VIDEO_MAX_SIZE, defaults.maxFileBytes)),
+            networkBps = prefs.getLong(KEY_NETWORK, defaults.networkBps),
             indexRefreshIntervalMillis =
                 prefs.getLong(KEY_REFRESH, defaults.indexRefreshIntervalMillis),
         ).sanitized()
@@ -132,24 +141,25 @@ class SettingsStore(context: Context) {
             .putInt(KEY_BLUR, value.blurSampleLongSide)
             .putFloat(KEY_MIN_PHOTO, value.minPhotoFraction)
             .putBoolean(KEY_TUNER, value.tunerEnabled)
-            .putLong(KEY_CACHE_BUDGET, value.cacheBudgetBytes)
-            .putLong(KEY_CACHE_THRESHOLD, value.cacheItemThresholdBytes)
             .putStringSet(KEY_FOLDERS, value.selectedFolders)
             .putBoolean(KEY_VIDEO, value.showVideo)
             .putBoolean(KEY_DOWNLOADS_DURING_VIDEO, value.downloadsDuringVideo)
             .putLong(KEY_VIDEO_MAX, value.videoMaxDurationMillis)
             .putBoolean(KEY_VIDEO_SOUND, value.videoSoundEnabled)
-            .putLong(KEY_VIDEO_MAX_SIZE, value.videoMaxSizeBytes)
-            .putLong(KEY_STREAM_BUFFER, value.streamBufferBytes)
-            .putLong(KEY_STREAM_BITRATE, value.streamMaxBitrateBps)
-            .putString(KEY_EXTERNAL, value.externalStorageUuid)
-            .putLong(KEY_EXTERNAL_RESERVE, value.externalReserveBytes)
             .putBoolean(KEY_PAIRS, value.pairPortraits)
             .putInt(KEY_FRESHNESS, value.freshnessWindowDays)
             .putBoolean(KEY_CLOCK, value.showClock)
             .putLong(KEY_PAUSE_RESUME, value.pauseAutoResumeMillis)
             .putBoolean(KEY_DATE, value.showDate)
             .putInt(KEY_PREFETCH, value.prefetchCount)
+            .putString(KEY_STORAGE_VOLUME, value.storageVolumeUuid)
+            .putLong(KEY_STORAGE_BYTES, value.storageBytes)
+            .putBoolean(KEY_STORAGE_BY_FREE, value.storageByFree)
+            .putLong(KEY_STORAGE_RESERVE, value.storageReserveBytes)
+            .putLong(KEY_MIN_STORE_PHOTO, value.minStorePhotoBytes)
+            .putLong(KEY_MIN_STORE_VIDEO, value.minStoreVideoBytes)
+            .putLong(KEY_MAX_FILE, value.maxFileBytes)
+            .putLong(KEY_NETWORK, value.networkBps)
             .putLong(KEY_REFRESH, value.indexRefreshIntervalMillis)
             .commit()
     }
@@ -169,8 +179,20 @@ class SettingsStore(context: Context) {
         const val KEY_DIM = "background_dim"
         const val KEY_BLUR = "blur_sample_long_side"
         const val KEY_TUNER = "tuner_enabled"
-        const val KEY_CACHE_BUDGET = "cache_budget_bytes"
-        const val KEY_CACHE_THRESHOLD = "cache_item_threshold_bytes"
+        const val KEY_STORAGE_VOLUME = "storage_volume_uuid"
+        const val KEY_STORAGE_BYTES = "storage_bytes"
+        const val KEY_STORAGE_BY_FREE = "storage_by_free"
+        const val KEY_STORAGE_RESERVE = "storage_reserve_bytes"
+        const val KEY_MIN_STORE_PHOTO = "min_store_photo_bytes"
+        const val KEY_MIN_STORE_VIDEO = "min_store_video_bytes"
+        const val KEY_MAX_FILE = "max_file_bytes"
+        const val KEY_NETWORK = "network_bps"
+        /** Ключи до 1.4 — читаются один раз для переноса. */
+        const val KEY_OLD_EXTERNAL = "external_storage_uuid"
+        const val KEY_OLD_EXTERNAL_RESERVE = "external_reserve_bytes"
+        const val KEY_OLD_CACHE_BUDGET = "cache_budget_bytes"
+        const val KEY_OLD_STREAM_BUFFER = "stream_buffer_bytes"
+        const val KEY_OLD_VIDEO_MAX_SIZE = "video_max_size_bytes"
         const val KEY_PREFETCH = "prefetch_count"
         const val KEY_REFRESH = "index_refresh_interval_millis"
         const val KEY_FOLDERS = "selected_folders"
@@ -178,11 +200,6 @@ class SettingsStore(context: Context) {
         const val KEY_DOWNLOADS_DURING_VIDEO = "downloads_during_video"
         const val KEY_VIDEO_MAX = "video_max_duration_millis"
         const val KEY_VIDEO_SOUND = "video_sound_enabled"
-        const val KEY_VIDEO_MAX_SIZE = "video_max_size_bytes"
-        const val KEY_STREAM_BUFFER = "stream_buffer_bytes"
-        const val KEY_STREAM_BITRATE = "stream_max_bitrate_bps"
-        const val KEY_EXTERNAL = "external_storage_uuid"
-        const val KEY_EXTERNAL_RESERVE = "external_reserve_bytes"
         const val KEY_PAIRS = "pair_portraits"
         const val KEY_FRESHNESS = "freshness_window_days"
         const val KEY_MIN_PHOTO = "min_photo_fraction"
@@ -201,10 +218,6 @@ class SettingsStore(context: Context) {
  * настройки отвечала пустотой, а причина выглядела как поломка сети.
  */
 fun FrameSettings.sanitized(): FrameSettings {
-    val budget = cacheBudgetBytes.coerceIn(
-        CachePolicy.MIN_BUDGET_BYTES,
-        CachePolicy.MAX_BUDGET_BYTES,
-    )
     return FrameSettings(
         // Ссылка приходит из ввода пультом и из adb: и пробелы, и полный адрес
         // с лишним хвостом — обычное дело.
@@ -226,8 +239,6 @@ fun FrameSettings.sanitized(): FrameSettings {
         // не больше 1280 px.
         minPhotoFraction = minPhotoFraction.coerceIn(0f, 0.6f),
         tunerEnabled = tunerEnabled,
-        cacheBudgetBytes = budget,
-        cacheItemThresholdBytes = cacheItemThresholdBytes.coerceIn(MIN_ITEM_THRESHOLD_BYTES, budget),
         // Пустые строки в наборе сломали бы отбор: пустой префикс совпадает
         // со всем подряд, и «выбрано ничего» превратилось бы в «выбрано всё».
         selectedFolders = selectedFolders.filter { it.isNotBlank() }.toSet(),
@@ -235,17 +246,20 @@ fun FrameSettings.sanitized(): FrameSettings {
         downloadsDuringVideo = downloadsDuringVideo,
         videoMaxDurationMillis = videoMaxDurationMillis.coerceIn(0L, 60L * 60 * 1000),
         videoSoundEnabled = videoSoundEnabled,
-        videoMaxSizeBytes = videoMaxSizeBytes.coerceIn(0L, 8L * 1024 * 1024 * 1024),
-        streamBufferBytes = streamBufferBytes.coerceIn(0L, 4L * 1024 * 1024 * 1024),
-        streamMaxBitrateBps = streamMaxBitrateBps.coerceIn(0L, 2_000_000_000L),
-        externalStorageUuid = externalStorageUuid.trim(),
-        externalReserveBytes = externalReserveBytes.coerceIn(0L, 1024L * 1024 * 1024 * 1024),
         pairPortraits = pairPortraits,
         freshnessWindowDays = freshnessWindowDays.coerceIn(1, 3650),
         showClock = showClock,
         pauseAutoResumeMillis = pauseAutoResumeMillis.coerceIn(0L, 24L * 60 * 60 * 1000),
         showDate = showDate,
         prefetchCount = prefetchCount.coerceIn(1, 50),
+        storageVolumeUuid = storageVolumeUuid.trim(),
+        storageBytes = storageBytes.coerceIn(0L, 4L * 1024 * 1024 * 1024 * 1024),
+        storageByFree = storageByFree,
+        storageReserveBytes = storageReserveBytes.coerceIn(0L, 1024L * 1024 * 1024 * 1024),
+        minStorePhotoBytes = minStorePhotoBytes.coerceIn(0L, 1024L * 1024 * 1024),
+        minStoreVideoBytes = minStoreVideoBytes.coerceIn(0L, 64L * 1024 * 1024 * 1024),
+        maxFileBytes = maxFileBytes.coerceIn(0L, 64L * 1024 * 1024 * 1024),
+        networkBps = networkBps.coerceIn(0L, 2_000_000_000L),
         // Не реже трёх часов: столько живут ссылки Диска на превью.
         indexRefreshIntervalMillis = indexRefreshIntervalMillis.coerceIn(
             60_000L,
@@ -255,4 +269,3 @@ fun FrameSettings.sanitized(): FrameSettings {
 }
 
 /** Ниже этого порога кэшировать нечего: столько весит одна уменьшенная копия. */
-private const val MIN_ITEM_THRESHOLD_BYTES = 1L * 1024 * 1024

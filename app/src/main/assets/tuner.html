@@ -104,10 +104,15 @@
   .list .dir { font-size: 11px; opacity: .7; direction: rtl; text-align: left; white-space: nowrap;
                overflow: hidden; text-overflow: ellipsis; padding: 0; }
   .list .item.full .dir { direction: ltr; white-space: normal; }
-  /* Ролик ещё не докачан — очередь пройдёт мимо него, пока он не готов. */
+  /* Видео ещё не докачано — очередь пройдёт мимо него, пока оно не готово. */
   .list .item.wait { opacity: .45; }
   .list .bad { color: var(--bad); }
   .list a { color: var(--text); text-decoration: none; border-bottom: 1px dotted var(--muted); }
+  .sub { display: flex; justify-content: space-between; align-items: center; margin-top: 8px;
+         font-size: 13px; color: var(--muted); }
+  .sub .value { font-size: 14px; }
+  .switch { display: flex; justify-content: space-between; align-items: center; margin-top: 10px;
+            padding-top: 8px; border-top: 1px solid var(--line); font-size: 14px; cursor: pointer; }
   .volume { display: flex; gap: 10px; align-items: center; padding: 9px 2px; cursor: pointer; }
   .volume .box { width: 24px; flex: none; color: var(--muted); }
   .volume.on .box { color: var(--accent); }
@@ -214,22 +219,13 @@
     <div class="bhead"></div>
     <div id="index"></div>
   </div>
-  <div class="row" data-block="cache">
+  <div class="row" data-block="storage">
     <div class="bhead"></div>
-    <div id="cache"></div>
-    <div class="bar"><i id="cachebar"></i></div>
-    <div id="streamwrap" hidden>
-      <div class="note" id="streamnote">буфер потока</div>
-      <div class="bar"><i id="streambar"></i></div>
-    </div>
-  </div>
-  <div class="row" data-block="flash">
-    <div class="bhead"></div>
-    <div id="external"></div>
-    <div class="bar"><i id="externalbar"></i></div>
-    <div id="archivewrap" hidden>
-      <div class="note" id="archivenote">закачка</div>
-      <div class="bar"><i id="archivebar"></i></div>
+    <div id="storage"></div>
+    <div class="bar"><i id="storagebar"></i></div>
+    <div id="downloadwrap" hidden>
+      <div class="note" id="downloadnote">закачка</div>
+      <div class="bar"><i id="downloadbar"></i></div>
     </div>
   </div>
   <div class="row" data-block="hours">
@@ -309,21 +305,35 @@ const logScale = {
 // Как крутить каждый ползунок: границы, шаг, пересчёт в единицы настройки и
 // обратно, как показать значение. Названия и подсказки — в settings-ui.json,
 // общем с приложением на телевизоре; страница подшивает их по ключу.
+const size = v => v >= 1073741824 ? (v / 1073741824).toFixed(v % 1073741824 ? 1 : 0) + ' ГБ'
+  : v >= 1048576 ? Math.round(v / 1048576) + ' МБ' : Math.round(v / 1024) + ' КБ';
+// Замер скорости приходит вместе со списком томов и показывается рядом с «авто».
+let measured = { bps: 0, samples: 0 };
+const measuredNote = () => measured.samples ? ' · замер ' + Math.round(measured.bps / 1000000) + ' Мбит/с' : ' · замеров ещё нет';
+
 const SLIDERS = {
   pauseAutoResumeMillis: { min: 0, max: 120, step: 1, get: v => Math.round(v / 60000), set: s => s * 60000,
     show: v => v ? Math.round(v / 60000) + ' мин' : 'пока не снимут' },
 
-  videoMaxSizeBytes: { min: 0, max: 8192, step: 64, get: v => Math.round(v / 1048576), set: s => s * 1048576,
-    show: v => !v ? 'без ограничения' : v >= 1073741824 ? (v / 1073741824).toFixed(1) + ' ГБ' : Math.round(v / 1048576) + ' МБ' },
+  maxFileBytes: { min: 0, max: 16384, step: 128, get: v => Math.round(v / 1048576), set: s => s * 1048576,
+    show: v => !v ? 'без ограничения' : size(v) },
 
-  streamBufferBytes: { min: 0, max: 4096, step: 64, get: v => Math.round(v / 1048576), set: s => s * 1048576,
-    show: v => !v ? 'нет' : v >= 1073741824 ? (v / 1073741824).toFixed(1) + ' ГБ' : Math.round(v / 1048576) + ' МБ' },
+  // «Не хранить легче»: копии снимков весят около 200 КБ, видео — сотни мегабайт.
+  minStorePhotoBytes: { min: 0, max: 2048, step: 16, get: v => Math.round(v / 1024), set: s => s * 1024,
+    show: v => !v ? 'хранить все' : size(v) },
 
-  streamMaxBitrateBps: { min: 0, max: 200, step: 5, get: v => Math.round(v / 1000000), set: s => s * 1000000,
-    show: v => !v ? 'всё стримится' : Math.round(v / 1000000) + ' Мбит/с' },
+  minStoreVideoBytes: { min: 0, max: 4096, step: 16, get: v => Math.round(v / 1048576), set: s => s * 1048576,
+    show: v => !v ? 'хранить все' : size(v) },
 
-  externalReserveBytes: { min: 0, max: 64, step: 1, get: v => Math.round(v / 536870912), set: s => s * 536870912,
-    show: v => (v / 1073741824).toFixed(1) + ' ГБ' },
+  // Потолок обоих — размер выбранного диска; страница подставляет его из списка томов.
+  storageBytes: { min: 0, max: 65536, step: 256, get: v => Math.round(v / 1048576), set: s => s * 1048576,
+    show: v => size(v) },
+
+  storageReserveBytes: { min: 0, max: 65536, step: 256, get: v => Math.round(v / 1048576), set: s => s * 1048576,
+    show: v => size(v) },
+
+  networkBps: { min: 0, max: 200, step: 5, get: v => Math.round(v / 1000000), set: s => s * 1000000,
+    show: v => (v ? Math.round(v / 1000000) + ' Мбит/с' : 'авто') + measuredNote() },
 
   videoMaxDurationMillis: { min: 0, max: 1800, step: 10,
     get: v => Math.round(v / 1000), set: s => s * 1000,
@@ -376,14 +386,6 @@ const SLIDERS = {
     set: s => s <= 50 ? Math.round(1 + s / 50 * 29)
                       : Math.round(30 * Math.pow(365 / 30, (s - 50) / 50)),
     show: v => v < 30 ? v + ' дн.' : v >= 360 ? 'год' : Math.round(v / 30) + ' мес.' },
-
-  cacheBudgetBytes: { min: 64, max: 8192, step: 64,
-    get: v => Math.round(v / 1048576), set: s => s * 1048576,
-    show: v => v >= 1073741824 ? (v / 1073741824).toFixed(1) + ' ГБ' : Math.round(v / 1048576) + ' МБ' },
-
-  cacheItemThresholdBytes: { min: 1, max: 2048, step: 1,
-    get: v => Math.round(v / 1048576), set: s => s * 1048576,
-    show: v => Math.round(v / 1048576) + ' МБ' },
 
   prefetchCount: { min: 1, max: 50, step: 1, get: v => v, set: s => s, show: v => v + ' кадр(ов)' },
 
@@ -485,12 +487,101 @@ function folderRow(item) {
   return row;
 }
 
-function volumeRow(item) {
+function placeRow(item) {
   const row = document.createElement('div');
   row.className = 'row';
   row.innerHTML = headHtml(item) +
     '<div class="list" id="volumes"><div class="empty">…</div></div>' + helpBox(item.help);
   return row;
+}
+
+// Два бегунка в одной строке: «фото» и «видео» под общим заголовком.
+function dualRow(item) {
+  const keys = [item.key].concat(item.extra || []);
+  const labels = [(item.labels || {}).first || '', (item.labels || {}).second || ''];
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML = headHtml(item);
+  keys.forEach((key, i) => {
+    const f = Object.assign({ key }, SLIDERS[key]);
+    FIELDS.push(f);
+    const line = document.createElement('div');
+    line.className = 'sub';
+    line.innerHTML = '<span>' + escapeHtml(labels[i]) + '</span><span class="right">' +
+      '<span class="value" id="v-' + key + '">—</span>' + undoButton(key) + '</span>';
+    const input = document.createElement('input');
+    input.type = 'range'; input.min = f.min; input.max = f.max; input.step = f.step;
+    input.addEventListener('input', () => { state[key] = f.set(Number(input.value)); paint(f); schedule(); });
+    line.querySelector('.undo').addEventListener('click', e => {
+      e.stopPropagation();
+      if (!(key in defaults)) return;
+      state[key] = defaults[key]; input.value = f.get(state[key]); paint(f); schedule();
+    });
+    row.appendChild(line); row.appendChild(input); inputs[key] = input;
+  });
+  row.insertAdjacentHTML('beforeend', helpBox(item.help));
+  return row;
+}
+
+// Объём хранилища: один бегунок с двумя смыслами. Переключатель «По свободному
+// месту» превращает его в «Запас» — меняются заголовок, строка и значение.
+let capacity = null;
+function capacityRow(item) {
+  const bytesF = Object.assign({ key: 'storageBytes' }, SLIDERS.storageBytes);
+  const reserveF = Object.assign({ key: 'storageReserveBytes' }, SLIDERS.storageReserveBytes);
+  FIELDS.push(bytesF, reserveF);
+  const t = { key: 'storageByFree' };
+  TOGGLES.push(t);
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML = '<div class="head"><span class="name" id="cap-title">' + escapeHtml(item.title) + info(item.help) +
+    '</span><span class="right">' +
+    '<span class="value" id="v-storageBytes">—</span><span class="value" id="v-storageReserveBytes" hidden>—</span>' +
+    undoButton('storageBytes') + '</span></div><div class="note" id="cap-note">' + escapeHtml(item.note) + '</div>';
+  const input = document.createElement('input');
+  input.type = 'range'; input.min = bytesF.min; input.max = bytesF.max; input.step = bytesF.step;
+  input.addEventListener('input', () => {
+    const f = state.storageByFree ? reserveF : bytesF;
+    state[f.key] = f.set(Number(input.value)); paint(f); schedule();
+  });
+  row.appendChild(input);
+  inputs.storageBytes = input; inputs.storageReserveBytes = input;
+  row.insertAdjacentHTML('beforeend', '<div class="switch" id="cap-switch"><span>' +
+    escapeHtml((item.labels || {}).toggle || '') + '</span><span class="value" id="v-storageByFree">—</span></div>' +
+    helpBox(item.help));
+  row.querySelector('#cap-switch').addEventListener('click', () => {
+    state.storageByFree = !state.storageByFree; paintToggle(t); paintCapacity(); schedule();
+  });
+  row.querySelector('.undo').addEventListener('click', e => {
+    e.stopPropagation();
+    const f = state.storageByFree ? reserveF : bytesF;
+    if (!(f.key in defaults)) return;
+    state[f.key] = defaults[f.key]; paintCapacity(); paint(f); schedule();
+  });
+  capacity = { item, input, bytesF, reserveF };
+  return row;
+}
+
+function paintCapacity() {
+  if (!capacity || !('storageBytes' in state)) return;
+  const byFree = !!state.storageByFree;
+  const text = byFree && capacity.item.alt ? capacity.item.alt : capacity.item;
+  document.getElementById('cap-title').innerHTML = escapeHtml(text.title) + info(capacity.item.help);
+  document.getElementById('cap-note').textContent = text.note || '';
+  document.getElementById('v-storageBytes').hidden = byFree;
+  document.getElementById('v-storageReserveBytes').hidden = !byFree;
+  const f = byFree ? capacity.reserveF : capacity.bytesF;
+  // Потолок — размер диска, где хранилище: памяти телевизора или выбранной флешки.
+  const total = placeTotalBytes();
+  if (total) capacity.input.max = Math.max(f.step, Math.floor(total / 1048576 / f.step) * f.step);
+  capacity.input.value = f.get(state[f.key]);
+  paint(f);
+  wireInfo(document.getElementById('cap-title').parentNode.parentNode);
+}
+
+// Скорость сети: бегунок, у нуля — «авто» с замером рядом.
+function speedRow(item) {
+  return sliderRow(item);
 }
 
 function sectionHead(section) {
@@ -521,7 +612,10 @@ function buildTune() {
       const row = item.kind === 'slider' ? sliderRow(item)
         : item.kind === 'toggle' ? toggleRow(item)
         : item.kind === 'folder' ? folderRow(item)
-        : item.kind === 'volume' ? volumeRow(item) : null;
+        : item.kind === 'place' ? placeRow(item)
+        : item.kind === 'dual' ? dualRow(item)
+        : item.kind === 'capacity' ? capacityRow(item)
+        : item.kind === 'speed' ? speedRow(item) : null;
       if (row) box.appendChild(row);
     }
     if (section.id === 'transfer') {
@@ -589,21 +683,28 @@ function render(data) {
   for (const f of FIELDS) { inputs[f.key].value = f.get(state[f.key]); paint(f); }
   for (const t of TOGGLES) paintToggle(t);
   paintVolumes();
+  paintCapacity();
 }
 
-// Тома под флешку: все подключённые. Выбранная помнится по UUID, поэтому
-// вынутая флешка остаётся выбранной — и помечается.
-let volumes = [];
+// Места хранилища: память телевизора и все подключённые флешки. Выбранная
+// помнится по UUID, поэтому вынутая флешка остаётся выбранной — и помечается.
+let volumes = [], tvPlace = null;
 const gb = n => (n / 1073741824).toFixed(1) + ' ГБ';
+function placeTotalBytes() {
+  const chosen = state.storageVolumeUuid || '';
+  const v = chosen ? volumes.find(x => x.uuid === chosen) : tvPlace;
+  return v ? v.totalBytes : 0;
+}
 function paintVolumes() {
   const box = document.getElementById('volumes');
   if (!box) return;
-  const chosen = state.externalStorageUuid || '';
-  const rows = [{ uuid: '', label: 'Без флешки', note: 'тяжёлые ролики пропускаются' }]
+  const chosen = state.storageVolumeUuid || '';
+  const rows = [{ uuid: '', label: 'Память телевизора',
+      note: tvPlace ? gb(tvPlace.totalBytes) + ', свободно ' + gb(tvPlace.freeBytes) : '' }]
     .concat(volumes.map(v => ({ uuid: v.uuid, label: v.label + ' (' + v.uuid + ')', bad: !v.usable,
       note: v.problem ? v.problem : gb(v.totalBytes) + ', свободно ' + gb(v.freeBytes) })));
   if (chosen && !volumes.some(v => v.uuid === chosen)) {
-    rows.push({ uuid: chosen, label: 'Флешка ' + chosen, note: 'не подключена', bad: true });
+    rows.push({ uuid: chosen, label: 'Флешка ' + chosen, note: 'не подключена — хранилище пока в памяти телевизора', bad: true });
   }
   box.innerHTML = rows.map(r =>
     '<div class="volume' + (r.uuid === chosen ? ' on' : '') + (r.bad ? ' bad' : '') +
@@ -611,15 +712,20 @@ function paintVolumes() {
     '<span class="box">' + (r.bad ? '⚠' : r.uuid === chosen ? '◉' : '○') + '</span>' +
     '<span>' + escapeHtml(r.label) + '<small>' + escapeHtml(r.note) + '</small></span></div>').join('');
   box.querySelectorAll('.volume:not(.bad)').forEach(el => el.addEventListener('click', () => {
-    state.externalStorageUuid = el.dataset.uuid; paintVolumes(); schedule();
+    state.storageVolumeUuid = el.dataset.uuid; paintVolumes(); paintCapacity(); schedule();
   }));
 }
 async function loadVolumes() {
   try {
     const d = await (await fetch('/api/storage')).json();
     volumes = d.volumes || [];
+    tvPlace = d.tv || null;
+    measured = { bps: d.networkBps || 0, samples: d.networkSamples || 0 };
   } catch (e) { volumes = []; }
   paintVolumes();
+  paintCapacity();
+  const speed = FIELDS.find(f => f.key === 'networkBps');
+  if (speed && 'networkBps' in state) paint(speed);
 }
 
 let timer = null;
@@ -634,7 +740,7 @@ async function send() {
   // движение ползунка перезапускало бы рамку.
   const body = FIELDS.concat(TOGGLES)
     .map(f => f.key + '=' + encodeURIComponent(state[f.key])).join('&') +
-    '&externalStorageUuid=' + encodeURIComponent(state.externalStorageUuid || '');
+    '&storageVolumeUuid=' + encodeURIComponent(state.storageVolumeUuid || '');
   try {
     const res = await fetch('/api/settings', { method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
@@ -651,7 +757,7 @@ document.getElementById('savefolder').addEventListener('click', async () => {
   if (!url) return;
   // Первое задание папки ничего не стирает — подтверждать нечего.
   const initial = !state.folderUrl;
-  if (!initial && !confirm('Библиотека, кэш и файлы на флешке от прежней папки будут удалены. Меняем?')) return;
+  if (!initial && !confirm('Библиотека и хранилище от прежней папки — и в памяти телевизора, и на флешке — будут удалены. Меняем?')) return;
   status.textContent = 'задаю папку…';
   const res = await fetch('/api/settings', { method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -1023,7 +1129,7 @@ const linked = items => items.length
     : '<div class="item' + (x.waiting ? ' wait' : '') + '" onclick="this.classList.toggle(\'full\')">' +
       '<a href="' + diskLink(x.path).replace(/"/g, '&quot;') + '" target="_blank" rel="noopener">' +
       escapeHtml(x.name) + '</a>' + (x.bitrate ? ' <small>' + Math.round(x.bitrate / 1000000) + ' Мбит/с</small>' : '') +
-      (x.waiting ? ' <small>ждёт закачки</small>' : '') +
+      (x.waiting ? ' <small>ждёт закачки</small>' : x.streamed ? ' <small>потоком</small>' : '') +
       '<div class="dir"><bdi>' + escapeHtml(dirOf(x.path)) + '</bdi></div></div>').join('')
   : '<div class="empty">пусто</div>';
 
@@ -1044,46 +1150,33 @@ async function loadState() {
   try {
     const d = await (await fetch('/api/state')).json();
     paintStatus(d);
-    const i = d.index, c = d.cache;
+    const i = d.index;
     document.getElementById('index').innerHTML =
       kv('всего файлов', i.total) + kv('фотографий', i.photos) + kv('видео', i.videos) +
       kv('нечем показать', i.unshowable) + kv('мельче порога', i.tooSmall) +
       (i.undecodable ? kv('телевизор не декодирует', i.undecodable) : '') + kv('показано хоть раз', i.shown) +
       kv('последний обход', i.syncedAt ? new Date(i.syncedAt).toLocaleString('ru-RU') : 'не было') +
       (d.indexing ? kv('идёт обход', d.indexing.files + ' файлов в ' + d.indexing.folders + ' папках…') : '');
-    const pr = c.priming;
-    document.getElementById('cache').innerHTML =
-      kv('занято', bytes(c.usedBytes)) + kv('из', bytes(c.budgetBytes)) + kv('файлов', c.files) +
-      '';
-    document.getElementById('cachebar').style.width =
-      Math.min(100, c.budgetBytes ? c.usedBytes / c.budgetBytes * 100 : 0) + '%';
-    // Своя полоска у буфера потока: пока идёт подкачка — её ход, иначе занятость.
-    const sw = document.getElementById('streamwrap');
-    sw.hidden = !c.primeBudgetBytes;
-    if (c.primeBudgetBytes) {
-      const fill = pr && pr.wantedBytes ? pr.doneBytes / pr.wantedBytes : c.primedBytes / c.primeBudgetBytes;
-      document.getElementById('streambar').style.width = Math.min(100, fill * 100) + '%';
-      document.getElementById('streamnote').textContent = pr
-        ? 'подкачка: ' + pr.name + ' — ' + Math.round(fill * 100) + ' %'
-        : 'буфер потока: ' + bytes(c.primedBytes) + ' из ' + bytes(c.primeBudgetBytes);
-    }
 
-    const x = d.external || {};
-    const ar = x.archiving;
-    document.getElementById('external').innerHTML = !x.uuid
-      ? kv('флешка', 'не выбрана') + kv('ждут флешку', x.waiting || 0)
-      : kv('флешка', (x.label || x.uuid) + (x.present ? '' : ' — ' + (x.problem || 'не подключена'))) +
-        (x.present ? kvPath('папка', x.path) + kv('занято', bytes(x.usedBytes)) + kv('свободно', bytes(x.freeBytes)) +
-          kv('файлов', x.files) : '') + kv('ждут флешку', x.waiting || 0);
-    document.getElementById('externalbar').style.width =
-      (x.present && x.totalBytes ? (x.totalBytes - x.freeBytes) / x.totalBytes * 100 : 0) + '%';
-    const aw = document.getElementById('archivewrap');
-    aw.hidden = !ar;
-    if (ar) {
-      const fill = ar.wantedBytes ? ar.doneBytes / ar.wantedBytes : 0;
-      document.getElementById('archivebar').style.width = Math.min(100, fill * 100) + '%';
-      document.getElementById('archivenote').textContent =
-        'качаю на флешку: ' + ar.name + ' — ' + Math.round(fill * 100) + ' % из ' + bytes(ar.wantedBytes);
+    const st = d.storage || {};
+    const where = st.place === 'flash' ? 'флешка ' + (st.label || st.chosen)
+      : 'память телевизора' + (st.fallback ? ' — флешка ' + (st.label || st.chosen) + ' ' + (st.problem || 'не подключена') : '');
+    const dl = st.downloading;
+    document.getElementById('storage').innerHTML =
+      kv('где', where) + (st.path ? kvPath('папка', st.path) : '') +
+      kv('занято', bytes(st.usedBytes || 0)) + kv(st.byFree ? 'можно занять' : 'объём', bytes(st.budgetBytes || 0)) +
+      kv('свободно на диске', bytes(st.freeBytes || 0)) +
+      kv('снимков', st.photos || 0) + kv('видео', st.videos || 0) + kv('видео ждут закачки', st.waiting || 0) +
+      kv('скорость сети', st.networkSamples ? Math.round(st.networkBps / 1000000) + ' Мбит/с по ' + st.networkSamples + ' закачк.' : 'замеров ещё нет');
+    document.getElementById('storagebar').style.width =
+      Math.min(100, st.budgetBytes ? st.usedBytes / st.budgetBytes * 100 : 0) + '%';
+    const dw = document.getElementById('downloadwrap');
+    dw.hidden = !dl;
+    if (dl) {
+      const fill = dl.wantedBytes ? dl.doneBytes / dl.wantedBytes : 0;
+      document.getElementById('downloadbar').style.width = Math.min(100, fill * 100) + '%';
+      document.getElementById('downloadnote').textContent =
+        'качаю: ' + dl.name + ' — ' + Math.round(fill * 100) + ' % из ' + bytes(dl.wantedBytes);
     }
 
     const peak = Math.max(1, ...d.hourly);

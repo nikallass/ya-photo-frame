@@ -24,7 +24,7 @@ class SettingsUiTest {
     @Test
     fun `у каждого ключа настроек ровно одно описание`() {
         val keys = FrameSettings().asMap().keys - notOnScreen
-        val described = ui.items().groupingBy { it.key }.eachCount()
+        val described = ui.items().flatMap { it.keys() }.groupingBy { it }.eachCount()
 
         assertEquals("нет описания", emptySet<String>(), keys - described.keys)
         assertEquals("лишние ключи", emptySet<String>(), described.keys - keys)
@@ -49,27 +49,27 @@ class SettingsUiTest {
     }
 
     @Test
-    fun `в текстах нет «носитель» и «кеш»`() {
+    fun `в текстах нет «носитель», «кеш» и «ролик»`() {
         val texts = ui.items().flatMap { listOf(it.title, it.note, it.help.orEmpty()) } +
             ui.sections.flatMap { listOf(it.title, it.note, it.help.orEmpty()) } +
             (ui.tabs.values + ui.blocks + ui.buttons.values).flatMap { listOf(it.title, it.note, it.help.orEmpty()) }
         val offenders = texts.filter { text ->
             val lower = text.lowercase()
-            "носител" in lower || "кеш" in lower
+            "носител" in lower || "кеш" in lower || "ролик" in lower
         }
         assertEquals(emptyList<String>(), offenders)
     }
 
     @Test
     fun `виды строк известны странице`() {
-        val kinds = setOf("slider", "toggle", "folder", "volume")
+        val kinds = setOf("slider", "toggle", "folder", "place", "dual", "capacity", "speed")
         assertEquals(emptyList<String>(), ui.items().filter { it.kind !in kinds }.map { it.key })
     }
 
     @Test
     fun `разделы идут в утверждённом порядке`() {
         assertEquals(
-            listOf("folder", "transitions", "motion", "background", "content", "video", "flash", "memory", "transfer"),
+            listOf("folder", "transitions", "motion", "background", "media", "storage", "transfer"),
             ui.sections.map { it.id },
         )
     }

@@ -34,12 +34,26 @@ data class SettingsUi(
     @Serializable
     data class Item(
         val key: String,
-        /** `slider`, `toggle`, `folder`, `volume` — как строку рисовать. */
+        /**
+         * Как строку рисовать: `slider`, `toggle`, `folder`, `place` (список
+         * мест хранилища), `dual` (два бегунка: фото и видео), `capacity`
+         * (бегунок объёма с переключателем «по свободному месту»), `speed`
+         * (бегунок скорости с «авто»).
+         */
         val kind: String,
         val title: String,
         val note: String,
         val help: String? = null,
-    )
+        /** Другие ключи настроек, которыми правит та же строка. */
+        val extra: List<String> = emptyList(),
+        /** Второй смысл строки, когда переключатель включён: «Запас» вместо «Объём». */
+        val alt: Block? = null,
+        /** Подписи внутри строки: бегунков в `dual`, переключателя в `capacity`. */
+        val labels: Map<String, String> = emptyMap(),
+    ) {
+        /** Все ключи настроек, которые правит строка. */
+        fun keys(): List<String> = listOf(key) + extra
+    }
 
     /** Блок вкладки или кнопка: заголовок, строка под ним, справка. */
     @Serializable

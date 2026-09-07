@@ -16,14 +16,14 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.os.SystemClock
-import ru.dvedev.me.yaphotoframe.cache.ArchiveStore
 import ru.dvedev.me.yaphotoframe.cache.MediaCache
 import ru.dvedev.me.yaphotoframe.cache.MediaFetcher
+import ru.dvedev.me.yaphotoframe.cache.NetworkGauge
+import ru.dvedev.me.yaphotoframe.cache.Storage
 import ru.dvedev.me.yaphotoframe.diag.Diary
 import ru.dvedev.me.yaphotoframe.diag.ShowStats
 import ru.dvedev.me.yaphotoframe.engine.FrameEngine
-import ru.dvedev.me.yaphotoframe.engine.ArchiveEvent
-import ru.dvedev.me.yaphotoframe.engine.PrimeEvent
+import ru.dvedev.me.yaphotoframe.engine.DownloadEvent
 import ru.dvedev.me.yaphotoframe.engine.PlaylistTuning
 import ru.dvedev.me.yaphotoframe.engine.PrefetchOutcome
 import ru.dvedev.me.yaphotoframe.library.FolderIndexStore
@@ -41,9 +41,6 @@ import ru.dvedev.me.yaphotoframe.slideshow.Slideshow
 import ru.dvedev.me.yaphotoframe.tuner.TunerServer
 import ru.dvedev.me.yaphotoframe.storage.ExternalMedia
 import ru.dvedev.me.yaphotoframe.video.HttpDurationProber
-import ru.dvedev.me.yaphotoframe.video.StreamHead
-import ru.dvedev.me.yaphotoframe.video.ExoStreamPrimer
-import ru.dvedev.me.yaphotoframe.video.StreamCache
 import ru.dvedev.me.yaphotoframe.video.VideoPlayback
 import ru.dvedev.me.yaphotoframe.ui.FramePlan
 import ru.dvedev.me.yaphotoframe.ui.GuideView
@@ -314,9 +311,9 @@ class FrameDreamService : DreamService() {
     /**
      * Переключает рамку на другую папку.
      *
-     * Индекс и кэш относятся к прежней папке целиком, поэтому вычищаются: иначе
-     * рамка мешала бы старые снимки с новыми и занимала место под то, чего
-     * больше не показывает.
+     * Индекс и хранилище относятся к прежней папке целиком, поэтому
+     * вычищаются — и в памяти телевизора, и на флешке: иначе рамка мешала бы
+     * старые снимки с новыми и занимала место под то, чего больше не показывает.
      */
     private fun switchFolder(url: String) {
         Diary.note("папка сменилась, начинаю заново")
@@ -324,76 +321,150 @@ class FrameDreamService : DreamService() {
         engine?.close()
         engine = null
         File(filesDir, LIBRARY_FILE).delete()
-        File(cacheDir, CACHE_DIRECTORY).deleteRecursively()
-        StreamCache.clear(this)
-        // Ролики прежней папки на флешке тоже не нужны — дерево там её.
+        val places = listOfNotNull(tvStorage, synchronized(this) { flashStorage })
         scope.launch(Dispatchers.IO) {
-            runCatching { externalStore()?.let { store -> store.keys().forEach(store::remove) } }
+            places.forEach { runCatching { it.clear() } }
+            runCatching { scratch.clear() }
         }
         slideshowView?.clear()
         startSlideshow()
     }
 
     private val media: ExternalMedia by lazy { ExternalMedia(this) }
-    private var externalCurrent: ArchiveStore? = null
-    private var externalVolume: ExternalMedia.Volume? = null
-    private var externalUuid: String? = null
-    private var externalCheckedAt = 0L
-    private var externalMissingNoted = false
+
+    /** Скорость сети по закачкам — живёт дольше движка, чтобы замер не терялся при перезапуске показа. */
+    private val gauge = NetworkGauge()
 
     /**
-     * Флешка под тяжёлые ролики, если он выбран и подключён.
+     * Кэш-времянка под снимки, которые хранить не велено («Не хранить легче»):
+     * снимок качается сюда к показу и вытесняется следующими.
+     */
+    private val scratch: MediaCache by lazy { MediaCache(File(cacheDir, SCRATCH_DIRECTORY), { SCRATCH_BYTES }) }
+
+    /**
+     * Хранилище в памяти телевизора — есть всегда: это и место по умолчанию,
+     * и запасное, когда выбранную флешку вынули.
+     */
+    private val tvStorage: Storage by lazy {
+        val root = File(cacheDir, STORAGE_DIRECTORY)
+        migrateLegacyCache(root)
+        Storage(root = root, place = Storage.Place.TvMemory, capacity = ::capacity)
+    }
+    private var flashStorage: Storage? = null
+    private var flashVolume: ExternalMedia.Volume? = null
+    private var flashUuid: String? = null
+    private var flashCheckedAt = 0L
+    private var flashMissingNoted = false
+
+    /** Объём хранилища из настроек: бегунок или свободное место минус запас. */
+    private fun capacity(): Storage.Capacity = store.current.let {
+        if (it.storageByFree) Storage.Capacity.ByFree(it.storageReserveBytes) else Storage.Capacity.Fixed(it.storageBytes)
+    }
+
+    /**
+     * Хранилище прямо сейчас: память телевизора или выбранная флешка.
      *
-     * Движок спрашивает его на каждый ролик при наборе очереди, а перечисление
-     * томов — обращение к системе; поэтому ответ живёт несколько секунд.
-     * Флешку вынули — ответ станет null, и тяжёлые ролики пойдут мимо;
+     * Движок спрашивает его на каждый файл при наборе очереди, поэтому ответ
+     * мгновенный — из того, что известно; а сама проверка флешки (обращение к
+     * системе и пробная запись) идёт раз в несколько секунд в фоне. Флешку
+     * вынули — рамка временно живёт в памяти телевизора и не пустеет;
      * вернули — тот же том, те же файлы, ничего качать заново не надо.
      */
     @Synchronized
-    private fun externalStore(): ArchiveStore? {
-        val wanted = store.current.externalStorageUuid
+    private fun storage(): Storage {
+        val wanted = store.current.storageVolumeUuid
         if (wanted.isBlank()) {
-            externalCurrent = null
-            externalVolume = null
-            externalUuid = null
-            return null
+            flashStorage = null
+            flashVolume = null
+            flashUuid = null
+            return tvStorage
         }
         val now = SystemClock.elapsedRealtime()
-        if (externalUuid == wanted && now - externalCheckedAt < EXTERNAL_CHECK_MILLIS) return externalCurrent
-        externalCheckedAt = now
-        val volume = runCatching { media.volume(wanted) }.getOrNull()
-        val root = volume?.root
-        if (volume == null || root == null || !volume.usable) {
-            if (externalCurrent != null || !externalMissingNoted) {
-                val why = volume?.problem?.let { ": $it" } ?: " не подключён"
-                Diary.note("флешка ${volume?.label ?: wanted}$why — ролики тяжелее сети пропускаются")
-                externalMissingNoted = true
+        val stale = flashUuid != wanted || now - flashCheckedAt >= FLASH_CHECK_MILLIS
+        if (stale && !flashChecking) {
+            flashChecking = true
+            flashCheckedAt = now
+            scope.launch(Dispatchers.IO) {
+                try {
+                    checkFlash(wanted)
+                } finally {
+                    synchronized(this@FrameDreamService) { flashChecking = false }
+                }
             }
-            externalCurrent = null
-            externalVolume = null
-            externalUuid = wanted
-            return null
         }
-        externalVolume = volume
-        if (externalCurrent == null || externalUuid != wanted) {
-            root.mkdirs()
-            val cache = MediaCache(
-                directory = root,
-                budgetBytes = MediaCache.reserveBudget(root, { store.current.externalReserveBytes }),
-            )
-            cache.sweepLeftovers()
-            externalCurrent = ArchiveStore(cache, MediaFetcher(Http.client, cache))
-            externalUuid = wanted
-            externalMissingNoted = false
-            Diary.note("флешка ${volume.label}: ${root.path}")
-        }
-        return externalCurrent
+        return if (flashUuid == wanted) flashStorage ?: tvStorage else tvStorage
     }
 
-    /** Тома для страницы настройки: что можно выбрать флешкой. */
-    private fun storageJson(): String {
+    @Volatile
+    private var flashChecking = false
+
+    /** Проверяет том и, если он на месте, поднимает на нём хранилище. */
+    private fun checkFlash(wanted: String) {
+        val volume = runCatching { media.volume(wanted) }.getOrNull()
+        val root = volume?.root
+        val usable = volume != null && root != null && volume.usable
+        val current = synchronized(this) { flashStorage }
+        var fresh: Storage? = null
+        if (usable && (current == null || (current.place as Storage.Place.Flash).uuid != wanted)) {
+            root!!.mkdirs()
+            migrateLegacyFlash(root)
+            fresh = Storage(root = root, place = Storage.Place.Flash(wanted, volume!!.label), capacity = ::capacity)
+        }
+        synchronized(this) {
+            flashVolume = volume
+            flashUuid = wanted
+            if (!usable) {
+                if (flashStorage != null || !flashMissingNoted) {
+                    val why = volume?.problem?.let { ": $it" } ?: " не подключена"
+                    Diary.note("флешка ${volume?.label ?: wanted}$why — хранилище пока в памяти телевизора")
+                    flashMissingNoted = true
+                }
+                flashStorage = null
+            } else if (fresh != null) {
+                flashStorage = fresh
+                flashMissingNoted = false
+                Diary.note("хранилище на флешке ${volume!!.label}: ${root!!.path}")
+            }
+        }
+    }
+
+    /**
+     * Копии снимков из кэша сборок до 1.4 переезжают в хранилище одним
+     * переименованием папки — качать их заново незачем. Буфер потока и
+     * папка тяжёлых роликов тех же сборок — вон, это гигабайты.
+     */
+    private fun migrateLegacyCache(root: File) {
+        val previews = File(root, Storage.PREVIEWS)
+        val old = File(cacheDir, LEGACY_CACHE_DIRECTORY)
+        if (old.isDirectory && !previews.exists()) {
+            root.mkdirs()
+            if (old.renameTo(previews)) Diary.note("копии снимков перенесены из кэша в хранилище")
+        }
+        old.deleteRecursively()
+        File(cacheDir, "stream").deleteRecursively()
+        File(cacheDir, "heavy").deleteRecursively()
+    }
+
+    /** Видео, которые сборки до 1.4 клали в корень папки на флешке, переезжают в `videos/`. */
+    private fun migrateLegacyFlash(root: File) {
+        val videos = File(root, Storage.VIDEOS)
+        val stray = root.listFiles().orEmpty().filter {
+            it.name != Storage.VIDEOS && it.name != Storage.PREVIEWS && !it.name.startsWith(".")
+        }
+        if (stray.isEmpty()) return
+        videos.mkdirs()
+        val moved = stray.count { it.renameTo(File(videos, it.name)) }
+        if (moved > 0) Diary.note("видео на флешке перенесены в папку videos: $moved")
+    }
+
+    /** Тома для страницы настройки: что можно выбрать местом хранилища, и память телевизора рядом. */
+    private fun volumesJson(): String {
         val volumes = runCatching { media.volumes() }.getOrDefault(emptyList())
-        return "{\"chosen\":\"" + escape(store.current.externalStorageUuid) + "\",\"volumes\":" +
+        return "{\"chosen\":\"" + escape(store.current.storageVolumeUuid) + "\"," +
+            "\"tv\":{\"totalBytes\":" + cacheDir.totalSpace + ",\"freeBytes\":" + cacheDir.usableSpace +
+            ",\"usedBytes\":" + (runCatching { tvStorage.usedBytes() }.getOrDefault(0L)) + "}," +
+            "\"networkBps\":" + (gauge.measuredBps() ?: 0L) + ",\"networkSamples\":" + gauge.sampleCount() + "," +
+            "\"volumes\":" +
             volumes.joinToString(",", "[", "]") {
                 "{\"uuid\":\"" + escape(it.uuid) + "\",\"label\":\"" + escape(it.label) +
                     "\",\"path\":\"" + escape(it.root?.path ?: "") + "\",\"totalBytes\":" + it.totalBytes +
@@ -402,26 +473,36 @@ class FrameDreamService : DreamService() {
             } + "}"
     }
 
-    private fun externalJson(): String {
+    /** Хранилище для «Состояния»: где, сколько занято, что качается. */
+    private fun storageJson(): String {
         val engine = engine
-        val current = externalStore()
-        val volume = externalVolume
-        val chosen = store.current.externalStorageUuid
+        val state = engine?.storageState()
+        val chosen = store.current.storageVolumeUuid
+        val volume = synchronized(this) { flashVolume }
+        val place = state?.place
+        val fallback = chosen.isNotBlank() && place != null && place !is Storage.Place.Flash
         return buildString {
             append('{')
-            append("\"uuid\":\"").append(escape(chosen)).append("\",")
-            append("\"present\":").append(current != null).append(',')
-            append("\"label\":\"").append(escape(volume?.label ?: "")).append("\",")
-            append("\"problem\":").append(volume?.problem?.let { "\"" + escape(it) + "\"" } ?: "null").append(',')
-            append("\"path\":\"").append(escape(volume?.root?.path ?: "")).append("\",")
-            append("\"usedBytes\":").append(current?.usedBytes() ?: 0).append(',')
-            append("\"freeBytes\":").append(current?.freeBytes() ?: 0).append(',')
-            append("\"totalBytes\":").append(volume?.totalBytes ?: 0).append(',')
-            append("\"files\":").append(current?.files() ?: 0).append(',')
-            append("\"reserveBytes\":").append(store.current.externalReserveBytes).append(',')
-            append("\"waiting\":").append(engine?.waitingForStorage() ?: 0).append(',')
-            append("\"archiving\":").append(
-                engine?.archiveState()?.let {
+            append("\"place\":\"").append(if (place is Storage.Place.Flash) "flash" else "tv").append("\",")
+            append("\"chosen\":\"").append(escape(chosen)).append("\",")
+            append("\"label\":\"").append(escape((place as? Storage.Place.Flash)?.label ?: volume?.label ?: "")).append("\",")
+            append("\"fallback\":").append(fallback).append(',')
+            append("\"problem\":").append(
+                if (fallback) "\"" + escape(volume?.problem ?: "не подключена") + "\"" else "null",
+            ).append(',')
+            append("\"path\":\"").append(escape(state?.path ?: "")).append("\",")
+            append("\"usedBytes\":").append(state?.usedBytes ?: 0).append(',')
+            append("\"budgetBytes\":").append(state?.budgetBytes ?: 0).append(',')
+            append("\"freeBytes\":").append(state?.freeBytes ?: 0).append(',')
+            append("\"totalBytes\":").append(state?.totalBytes ?: 0).append(',')
+            append("\"photos\":").append(state?.photos ?: 0).append(',')
+            append("\"videos\":").append(state?.videos ?: 0).append(',')
+            append("\"byFree\":").append(store.current.storageByFree).append(',')
+            append("\"waiting\":").append(engine?.let { kotlinx.coroutines.runBlocking { it.waitingCount() } } ?: 0).append(',')
+            append("\"networkBps\":").append(state?.measuredNetworkBps ?: 0).append(',')
+            append("\"networkSamples\":").append(state?.networkSamples ?: 0).append(',')
+            append("\"downloading\":").append(
+                state?.downloading?.let {
                     "{\"name\":\"${escape(it.item.name)}\",\"wantedBytes\":${it.wantedBytes}," +
                         "\"doneBytes\":${it.doneBytes},\"startedAt\":${it.startedAtMillis}}"
                 } ?: "null",
@@ -452,18 +533,6 @@ class FrameDreamService : DreamService() {
                 showGuide()
                 return
             }
-            val cache = MediaCache(
-                directory = File(cacheDir, CACHE_DIRECTORY),
-                budgetBytes = { store.current.cacheBudgetBytes },
-            )
-            // Буфер потока пересоздаётся под текущий объём: плеер и подкачка
-            // делят один и тот же.
-            val streamCache = withContext(Dispatchers.IO) {
-                // Одна из прежних сборок складывала тяжёлые ролики целиком
-                // сюда — на телевизоре это гигабайты, прибираем.
-                File(cacheDir, "heavy").deleteRecursively()
-                StreamCache.open(this@FrameDreamService, store.current.streamBufferBytes)
-            }
             // Движок при создании читает индекс с диска — на большой библиотеке
             // это четыре мегабайта JSON и почти три секунды. Делать это на
             // главном потоке значило бы замереть на старте заставки.
@@ -491,22 +560,22 @@ class FrameDreamService : DreamService() {
                 ),
                 store = LibraryStore(File(filesDir, LIBRARY_FILE)),
                 folderStore = FolderIndexStore(File(filesDir, FOLDERS_FILE)),
-                cache = cache,
-                fetcher = MediaFetcher(Http.client, cache),
-                primer = ExoStreamPrimer(streamCache),
-                primeBudgetBytes = { store.current.streamBufferBytes },
-                onPrime = ::reportPrime,
+                storage = ::storage,
+                scratch = scratch,
+                fetcher = MediaFetcher(Http.client),
+                prefetchCount = { store.current.prefetchCount },
                 prober = HttpDurationProber(Http.client),
-                channelBps = { store.current.streamMaxBitrateBps },
-                maxVideoDurationMillis = { store.current.videoMaxDurationMillis },
-                external = ::externalStore,
-                onArchive = ::reportArchive,
-                policy = { store.current.cachePolicy() },
+                gauge = gauge,
+                decodable = playback::decodable,
+                onDownload = ::reportDownload,
                 includeVideo = { store.current.showVideo },
                 minPhotoLongSide = ::minPhotoLongSide,
                 measure = { _, file -> imageLongSide(file) },
                 selection = ::currentSelection,
-                maxVideoBytes = { store.current.videoMaxSizeBytes },
+                maxFileBytes = { store.current.maxFileBytes },
+                minStorePhotoBytes = { store.current.minStorePhotoBytes },
+                minStoreVideoBytes = { store.current.minStoreVideoBytes },
+                networkBps = { store.current.networkBps },
                 tuning = {
                     PlaylistTuning(
                         freshnessWindowMillis =
@@ -515,7 +584,7 @@ class FrameDreamService : DreamService() {
                 },
                 )
             }
-            // Прежний движок мог качать тяжёлый ролик — ему пора остановиться.
+            // Прежний движок мог качать видео — ему пора остановиться.
             this.engine?.close()
             this.engine = engine
             activeFolderUrl = store.current.folderUrl
@@ -525,19 +594,6 @@ class FrameDreamService : DreamService() {
                 deliver = engine::deliver,
                 settings = { store.current },
                 minLongSide = ::minPhotoLongSide,
-                streamHead = { item, delivery ->
-                    val key = delivery.cacheKey
-                    val cache = StreamCache.current()
-                    if (key != null && cache != null && item.sizeBytes > 0) {
-                        StreamHead.copy(
-                            cache, key, delivery.url,
-                            minOf(item.sizeBytes, StreamHead.HEAD_BYTES),
-                            File(cacheDir, "poster-head.${System.nanoTime()}.mov"),
-                        )
-                    } else {
-                        null
-                    }
-                },
             )
 
             // Холодный старт: показать хоть что-нибудь, не дожидаясь обхода.
@@ -824,7 +880,7 @@ class FrameDreamService : DreamService() {
         playback.setSoundEnabled(enabled)
         overlay(showingSound = enabled)
         slideshowView?.flashSound(enabled)
-        Diary.note(if (enabled) "звук в роликах включён с пульта" else "звук в роликах выключен с пульта")
+        Diary.note(if (enabled) "звук в видео включён с пульта" else "звук в видео выключен с пульта")
     }
 
     /** Значок звука виден, только пока идёт ролик и звук включён. */
@@ -875,16 +931,10 @@ class FrameDreamService : DreamService() {
         showingVideo = prepared is PreparedVideo
         currentItemPath = prepared.item.path
         if (!showingVideo) overlay(showingSound = false)
-        // Пока ролик на экране: подкачка потока ждёт, если ролик сам идёт
-        // потоком (они делят сеть); всё остальное — по настройке «Закачки во
-        // время ролика». Подготовка после смены кадра возобновит.
-        val video = prepared as? PreparedVideo
-        val holdAll = video != null && !store.current.downloadsDuringVideo
-        engine?.holdDownloads(
-            all = holdAll,
-            priming = holdAll ||
-                video?.delivery is ru.dvedev.me.yaphotoframe.cache.Delivery.Streamed,
-        )
+        // Пока видео на экране, закачки видео стоят по настройке «Закачки во
+        // время видео»; снимки качаются всегда. Подготовка после смены кадра
+        // возобновит.
+        engine?.holdDownloads(prepared is PreparedVideo && !store.current.downloadsDuringVideo)
         // Плеер здесь не останавливаем: пока слой с роликом виден, он держит на
         // поверхности последний кадр. Отпустим его, когда слой уйдёт.
         if (prepared is PreparedVideo) startPlayback(prepared)
@@ -918,7 +968,7 @@ class FrameDreamService : DreamService() {
         val share = ru.dvedev.me.yaphotoframe.video.FrameCorruption.garbageShare(pixels)
         if (share < ru.dvedev.me.yaphotoframe.video.FrameCorruption.THRESHOLD) return
         Diary.problem(
-            "телевизор не декодирует ${prepared.item.name}: кадр полосами (${(share * 100).toInt()} % мусора) — ролик больше не показывается",
+            "телевизор не декодирует ${prepared.item.name}: кадр полосами (${(share * 100).toInt()} % мусора) — видео больше не показывается",
         )
         playback.stop()
         scope.launch { engine?.markUndecodable(prepared.item.path) }
@@ -928,10 +978,10 @@ class FrameDreamService : DreamService() {
     private fun startPlayback(prepared: PreparedVideo) {
         val view = slideshowView ?: return
         val source = when (prepared.delivery) {
-            is ru.dvedev.me.yaphotoframe.cache.Delivery.Local -> "из кэша"
+            is ru.dvedev.me.yaphotoframe.cache.Delivery.Local -> "из хранилища"
             is ru.dvedev.me.yaphotoframe.cache.Delivery.Streamed -> "потоком"
         }
-        Diary.note("ролик ${prepared.item.name}: $source, ${prepared.item.sizeBytes / 1_048_576} МБ")
+        Diary.note("видео ${prepared.item.name}: $source, ${prepared.item.sizeBytes / 1_048_576} МБ")
         var stalls = 0
         overlay(showingSound = store.current.videoSoundEnabled)
         if (paused) {
@@ -943,7 +993,7 @@ class FrameDreamService : DreamService() {
             surface = view.videoSurface,
             soundEnabled = store.current.videoSoundEnabled,
             onEnded = {
-                // Ролик кончился раньше отведённого срока — незачем держать
+                // Видео кончилось раньше отведённого срока — незачем держать
                 // застывший последний кадр до истечения таймера.
                 slideshow?.page(1)
             },
@@ -954,7 +1004,7 @@ class FrameDreamService : DreamService() {
             onUnsupported = { codec ->
                 // Декодер такой профиль не берёт, а взявшись, рисует полосами:
                 // ролик вон из очереди насовсем, в индексе пометка.
-                Diary.problem("телевизор не декодирует ${prepared.item.name} ($codec) — ролик больше не показывается")
+                Diary.problem("телевизор не декодирует ${prepared.item.name} ($codec) — видео больше не показывается")
                 scope.launch { engine?.markUndecodable(prepared.item.path) }
                 slideshow?.page(1)
             },
@@ -971,7 +1021,7 @@ class FrameDreamService : DreamService() {
                 // Длительность — в дневник: ролик с фотоаппарата на десять
                 // секунд весит как фильм, и без неё кажется, что он оборвался.
                 val seconds = playback.durationMillis() / 1000
-                if (seconds > 0) Diary.note("ролик ${prepared.item.name} пошёл, ${formatSeconds(seconds)}")
+                if (seconds > 0) Diary.note("видео ${prepared.item.name} пошло, ${formatSeconds(seconds)}")
             },
             onStalled = {
                 // Пропускать ролик из-за заиканий не стали: владелец решил,
@@ -979,14 +1029,14 @@ class FrameDreamService : DreamService() {
                 // несколько остановок, дальше это уже не новость.
                 stalls++
                 if (stalls <= STALLS_TO_NOTE) {
-                    Diary.note("ролик ${prepared.item.name} встал на подкачку ($stalls)")
+                    Diary.note("видео ${prepared.item.name} встало на подкачку ($stalls)")
                 }
             },
         )
     }
 
     private fun describe(prepared: PreparedItem): String = when (prepared) {
-        is PreparedVideo -> "${prepared.item.name} (ролик)"
+        is PreparedVideo -> "${prepared.item.name} (видео)"
         is PreparedPhoto -> if (prepared.companionItem != null) {
             "${prepared.item.name} + ${prepared.companionItem?.name} (пара)"
         } else {
@@ -1002,7 +1052,7 @@ class FrameDreamService : DreamService() {
                 assets = assets,
                 diagnostics = ::diagnostics,
                 folders = ::foldersJson,
-                storage = ::storageJson,
+                storage = ::volumesJson,
                 hasVolume = { uuid -> runCatching { media.volumes() }.getOrDefault(emptyList()).any { it.uuid == uuid } },
                 onRescanFolders = {
                     scope.launch {
@@ -1055,7 +1105,6 @@ class FrameDreamService : DreamService() {
     private fun diagnostics(): String {
         val engine = engine
         val index = engine?.indexState()
-        val cache = engine?.cacheState()
         return buildString {
             append('{')
             append("\"index\":{")
@@ -1079,22 +1128,7 @@ class FrameDreamService : DreamService() {
             )
             append("},")
             append("\"status\":").append(statusJson()).append(',')
-            append("\"cache\":{")
-            append("\"usedBytes\":").append(cache?.usedBytes ?: 0).append(',')
-            append("\"budgetBytes\":").append(cache?.budgetBytes ?: 0).append(',')
-            append("\"files\":").append(cache?.files ?: 0).append(',')
-            append("\"primedBytes\":").append(cache?.primedBytes ?: 0).append(',')
-            append("\"primeBudgetBytes\":").append(cache?.primeBudgetBytes ?: 0).append(',')
-            // Что подкачивается: сотни мегабайт едут десятки секунд, и без
-            // счётчика непонятно, почему ролик всё не показывается.
-            append("\"priming\":").append(
-                engine?.primeState()?.let {
-                    "{\"name\":\"${escape(it.item.name)}\",\"wantedBytes\":${it.wantedBytes}," +
-                        "\"doneBytes\":${it.doneBytes},\"startedAt\":${it.startedAtMillis}}"
-                } ?: "null",
-            )
-            append("},")
-            append("\"external\":").append(externalJson()).append(',')
+            append("\"storage\":").append(storageJson()).append(',')
             append("\"queue\":").append(
                 jsonItems(engine?.let { kotlinx.coroutines.runBlocking { it.upcoming() } }.orEmpty()),
             )
@@ -1121,9 +1155,11 @@ class FrameDreamService : DreamService() {
         items.joinToString(",", "[", "]") {
             val bitrate = engine?.bitrateOf(it.path)
             val waiting = engine?.waiting(it) == true
+            val streamed = !waiting && engine?.streamed(it) == true
             "{\"name\":\"" + escape(it.name) + "\",\"path\":\"" + escape(it.path) + "\"" +
                 (if (bitrate != null) ",\"bitrate\":$bitrate" else "") +
-                (if (waiting) ",\"waiting\":true" else "") + "}"
+                (if (waiting) ",\"waiting\":true" else "") +
+                (if (streamed) ",\"streamed\":true" else "") + "}"
         }
 
     private fun jsonArray(values: List<String>): String =
@@ -1135,49 +1171,28 @@ class FrameDreamService : DreamService() {
         .replace("\n", " ")
 
     private fun reportPrefetch(outcome: PrefetchOutcome) {
-        val state = engine?.cacheState() ?: return
+        val state = engine?.storageState() ?: return
         Diary.note(
             "подготовка: положено ${outcome.fetched}, потоком ${outcome.streamed}, " +
-                "вытеснено ${outcome.evicted}; кэш ${state.usedBytes / 1024 / 1024} МБ " +
-                "в ${state.files} файлах из ${state.budgetBytes / 1024 / 1024} МБ",
+                "вытеснено ${outcome.evicted}; хранилище ${state.usedBytes / 1024 / 1024} МБ " +
+                "из ${state.budgetBytes / 1024 / 1024} МБ (снимков ${state.photos}, видео ${state.videos})",
         )
     }
 
-    /** Подкачка — в дневник: по ней видно и канал, и почему ролик ждёт. */
-    private fun reportPrime(event: PrimeEvent) {
+    /** Закачка видео — в дневник: по ней видно и скорость сети, и почему видео ждёт. */
+    private fun reportDownload(event: DownloadEvent) {
         when (event) {
-            is PrimeEvent.Started ->
-                Diary.note(
-                    "ролик ${event.item.name}: подкачиваю заранее ${event.bytes / 1_048_576} МБ " +
-                        "из ${event.item.sizeBytes / 1_048_576}",
-                )
-            is PrimeEvent.Finished -> {
-                val seconds = maxOf(1L, event.tookMillis / 1000)
-                val speed = event.bytes / 1_048_576.0 / seconds
-                Diary.note(
-                    "ролик ${event.item.name} подкачан за ${formatSeconds(seconds)}, " +
-                        "${"%.1f".format(speed)} МБ/с",
-                )
-            }
-            is PrimeEvent.Failed ->
-                Diary.problem("ролик ${event.item.name} не подкачался, пойдёт потоком как есть: ${event.reason}")
-        }
-    }
-
-    /** Закачка на флешка — в дневник: по ней видно и канал, и почему ролик ждёт. */
-    private fun reportArchive(event: ArchiveEvent) {
-        when (event) {
-            is ArchiveEvent.Started ->
-                Diary.note("ролик ${event.item.name}: качаю на флешку ${event.item.sizeBytes / 1_048_576} МБ")
-            is ArchiveEvent.Finished -> {
+            is DownloadEvent.Started ->
+                Diary.note("видео ${event.item.name}: качаю ${placeName(event.place)} ${event.item.sizeBytes / 1_048_576} МБ")
+            is DownloadEvent.Finished -> {
                 val seconds = maxOf(1L, event.tookMillis / 1000)
                 val speed = event.item.sizeBytes / 1_048_576.0 / seconds
                 Diary.note(
-                    "ролик ${event.item.name} на флешке за ${formatSeconds(seconds)}, " +
+                    "видео ${event.item.name} скачано ${placeName(event.place)} за ${formatSeconds(seconds)}, " +
                         "${"%.1f".format(speed)} МБ/с",
                 )
             }
-            is ArchiveEvent.Failed -> {
+            is DownloadEvent.Failed -> {
                 val tooLarge = event.reason.contains("too large", ignoreCase = true) ||
                     event.reason.contains("EFBIG")
                 val why = if (tooLarge) {
@@ -1185,9 +1200,16 @@ class FrameDreamService : DreamService() {
                 } else {
                     event.reason
                 }
-                Diary.problem("ролик ${event.item.name} не доехал до флешки: $why")
+                Diary.problem("видео ${event.item.name} не скачалось: $why")
             }
+            is DownloadEvent.Undecodable ->
+                Diary.problem("телевизор не декодирует ${event.item.name} (${event.codec}) — видео не качается и не показывается")
         }
+    }
+
+    private fun placeName(place: Storage.Place): String = when (place) {
+        is Storage.Place.TvMemory -> "в память телевизора"
+        is Storage.Place.Flash -> "на флешку ${place.label}"
     }
 
     private fun formatSeconds(seconds: Long): String =
@@ -1206,11 +1228,16 @@ class FrameDreamService : DreamService() {
         const val LIBRARY_FILE = "library.json"
         const val FOLDERS_FILE = "folders.json"
         const val STATS_FILE = "show-stats.csv"
-        const val CACHE_DIRECTORY = "media"
+        const val STORAGE_DIRECTORY = "storage"
+        const val SCRATCH_DIRECTORY = "scratch"
+        /** Кэш-времянка под «не хранить»: пара десятков снимков. */
+        const val SCRATCH_BYTES = 32L * 1024 * 1024
+        /** Кэш копий снимков сборок до 1.4 — переезжает в хранилище. */
+        const val LEGACY_CACHE_DIRECTORY = "media"
         const val WATCHDOG_TICK_MILLIS = 20_000L
         const val CLOCK_SKEW_NOTE_MILLIS = 3_000L
         const val WATCHDOG_GRACE_MILLIS = 90_000L
-        const val EXTERNAL_CHECK_MILLIS = 3_000L
+        const val FLASH_CHECK_MILLIS = 3_000L
         const val HISTORY_DEPTH = 10
         const val SKIP_NOTE_INTERVAL_MILLIS = 60_000L
 
@@ -1218,7 +1245,7 @@ class FrameDreamService : DreamService() {
         const val STALLS_TO_NOTE = 3
         /** Сколько держать подсказку, вызванную с пульта. */
         const val GUIDE_FLASH_MILLIS = 10_000L
-        /** «Без ограничения» для ролика: сутки, которых не бывает. */
+        /** «Без ограничения» для видео: сутки, которых не бывает. */
         const val UNLIMITED_VIDEO_MILLIS = 24L * 60 * 60 * 1000
     }
 }

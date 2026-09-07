@@ -62,13 +62,20 @@ class SetupActivity : Activity() {
     private val media by lazy { ru.dvedev.me.yaphotoframe.storage.ExternalMedia(this) }
 
     private fun describeVolume(uuid: String): String {
-        if (uuid.isBlank()) return "нет"
-        val volume = runCatching { media.volume(uuid) }.getOrNull() ?: return "$uuid — не подключена"
-        volume.problem?.let { return "${volume.label}: $it" }
-        return "${volume.label} ${volume.uuid}, свободно ${volume.freeBytes / 1_073_741_824} ГБ"
+        if (uuid.isBlank()) return "память телевизора, свободно ${cacheDir.usableSpace / 1_073_741_824} ГБ"
+        val volume = runCatching { media.volume(uuid) }.getOrNull()
+            ?: return "флешка $uuid не подключена — пока память телевизора"
+        volume.problem?.let { return "${volume.label}: $it — пока память телевизора" }
+        return "флешка ${volume.label} ${volume.uuid}, свободно ${volume.freeBytes / 1_073_741_824} ГБ"
     }
 
-    /** Перебор по кругу: «нет» и все подключённые флешки. */
+    /** Размер диска, где хранилище: потолок для объёма и запаса. */
+    private fun placeTotalBytes(uuid: String): Long {
+        if (uuid.isBlank()) return cacheDir.totalSpace
+        return runCatching { media.volume(uuid) }.getOrNull()?.totalBytes?.takeIf { it > 0 } ?: cacheDir.totalSpace
+    }
+
+    /** Перебор по кругу: память телевизора и все подключённые флешки. */
     private fun nextVolume(current: String, step: Int): String {
         val options = listOf("") +
             runCatching { media.volumes() }.getOrDefault(emptyList()).filter { it.usable }.map { it.uuid }
@@ -77,8 +84,9 @@ class SetupActivity : Activity() {
     }
 
     private class Row(
-        val title: String,
-        val hint: String,
+        /** Заголовок и строка под ним зависят от настроек: «Объём» становится «Запасом». */
+        val title: (FrameSettings) -> String,
+        val hint: (FrameSettings) -> String,
         val show: (FrameSettings) -> String,
         val edit: ((SetupActivity) -> Unit)? = null,
         // Последним параметром, чтобы описание строки читалось как одно целое:
@@ -181,7 +189,7 @@ class SetupActivity : Activity() {
                 )
             )
         }
-        container.addView(label(cacheSummary(), 14f, MUTED))
+        container.addView(label(storageSummary(), 14f, MUTED))
     }
 
     /**
@@ -208,7 +216,7 @@ class SetupActivity : Activity() {
         } else {
             "Заставка сейчас не запущена ($summary). Обход и показ начнутся, когда она включится."
         }
-        return "{\"index\":{\"total\":0},\"cache\":{\"usedBytes\":0,\"budgetBytes\":0,\"files\":0}," +
+        return "{\"index\":{\"total\":0},\"storage\":{\"place\":\"tv\",\"usedBytes\":0,\"budgetBytes\":0}," +
             "\"status\":{\"phase\":\"app\",\"text\":\"" + jsonEscape(status) + "\"}," +
             "\"queue\":[],\"hourly\":[],\"shows\":0,\"log\":[],\"failures\":[],\"errors\":[]}"
     }
@@ -259,13 +267,13 @@ class SetupActivity : Activity() {
         }.start()
     }
 
-    /** Занятость кэша считается прямо по директории: движок здесь не запущен. */
-    private fun cacheSummary(): String {
-        val directory = File(cacheDir, "media")
-        val files = directory.listFiles().orEmpty().filter { it.isFile }
+    /** Занятость хранилища считается прямо по папке в памяти телевизора: движок здесь не запущен. */
+    private fun storageSummary(): String {
+        val directory = File(cacheDir, "storage")
+        val files = directory.walkTopDown().filter { it.isFile }.toList()
         val used = files.sumOf { it.length() }
-        return "Кэш: ${used / 1024 / 1024} МБ в ${files.size} файлах " +
-            "из ${store.current.cacheBudgetBytes / 1024 / 1024} МБ"
+        val place = if (store.current.storageVolumeUuid.isBlank()) "память телевизора" else "флешка"
+        return "Хранилище: $place; в памяти телевизора ${used / 1024 / 1024} МБ в ${files.size} файлах"
     }
 
     /** Как показать и подвинуть значение по ключу настройки; тексты — из settings-ui.json. */
@@ -336,27 +344,31 @@ class SetupActivity : Activity() {
         "videoMaxDurationMillis" to Editor({ format(it.videoMaxDurationMillis) }) { s, d ->
             s.copy(videoMaxDurationMillis = (s.videoMaxDurationMillis + d * 30_000L).coerceAtLeast(0L))
         },
-        "videoMaxSizeBytes" to Editor(
-            { if (it.videoMaxSizeBytes <= 0) "без ограничения" else "${it.videoMaxSizeBytes / 1_048_576} МБ" },
-        ) { s, d -> s.copy(videoMaxSizeBytes = (s.videoMaxSizeBytes + d * 128L * 1_048_576).coerceAtLeast(0L)) },
-        "streamBufferBytes" to Editor(
-            { if (it.streamBufferBytes <= 0) "нет" else "${it.streamBufferBytes / 1_048_576} МБ" },
-        ) { s, d -> s.copy(streamBufferBytes = (s.streamBufferBytes + d * 128L * 1_048_576).coerceAtLeast(0L)) },
-        "streamMaxBitrateBps" to Editor(
-            { if (it.streamMaxBitrateBps <= 0) "всё стримится" else "${it.streamMaxBitrateBps / 1_000_000} Мбит/с" },
-        ) { s, d -> s.copy(streamMaxBitrateBps = (s.streamMaxBitrateBps + d * 5_000_000L).coerceAtLeast(0L)) },
-        "cacheItemThresholdBytes" to Editor({ megabytes(it.cacheItemThresholdBytes) }) { s, d ->
-            s.copy(cacheItemThresholdBytes = s.cacheItemThresholdBytes + d * 10L * 1024 * 1024)
+        "maxFileBytes" to Editor(
+            { if (it.maxFileBytes <= 0) "без ограничения" else size(it.maxFileBytes) },
+        ) { s, d -> s.copy(maxFileBytes = (s.maxFileBytes + d * 128L * 1_048_576).coerceAtLeast(0L)) },
+        "minStorePhotoBytes" to Editor(
+            { if (it.minStorePhotoBytes <= 0) "хранить все" else size(it.minStorePhotoBytes) },
+        ) { s, d -> s.copy(minStorePhotoBytes = (s.minStorePhotoBytes + d * 16L * 1024).coerceAtLeast(0L)) },
+        "minStoreVideoBytes" to Editor(
+            { if (it.minStoreVideoBytes <= 0) "хранить все" else size(it.minStoreVideoBytes) },
+        ) { s, d -> s.copy(minStoreVideoBytes = (s.minStoreVideoBytes + d * 16L * 1_048_576).coerceAtLeast(0L)) },
+        "storageVolumeUuid" to Editor({ describeVolume(it.storageVolumeUuid) }) { s, d ->
+            s.copy(storageVolumeUuid = nextVolume(s.storageVolumeUuid, d))
         },
-        "externalStorageUuid" to Editor({ describeVolume(it.externalStorageUuid) }) { s, d ->
-            s.copy(externalStorageUuid = nextVolume(s.externalStorageUuid, d))
+        // Один бегунок с двумя смыслами: объём, а при «по свободному месту» — запас.
+        "storageBytes" to Editor(
+            { if (it.storageByFree) size(it.storageReserveBytes) else size(it.storageBytes) },
+        ) { s, d ->
+            val step = d * 256L * 1_048_576
+            val ceiling = placeTotalBytes(s.storageVolumeUuid)
+            if (s.storageByFree) s.copy(storageReserveBytes = (s.storageReserveBytes + step).coerceIn(0L, ceiling))
+            else s.copy(storageBytes = (s.storageBytes + step).coerceIn(0L, ceiling))
         },
-        "externalReserveBytes" to Editor({ "%.1f ГБ".format(it.externalReserveBytes / 1_073_741_824.0) }) { s, d ->
-            s.copy(externalReserveBytes = (s.externalReserveBytes + d * 536_870_912L).coerceAtLeast(0L))
-        },
-        "cacheBudgetBytes" to Editor({ megabytes(it.cacheBudgetBytes) }) { s, d ->
-            s.copy(cacheBudgetBytes = s.cacheBudgetBytes + d * 64L * 1024 * 1024)
-        },
+        "storageByFree" to toggle({ it.storageByFree }) { it.copy(storageByFree = !it.storageByFree) },
+        "networkBps" to Editor(
+            { if (it.networkBps <= 0) "авто" else "${it.networkBps / 1_000_000} Мбит/с" },
+        ) { s, d -> s.copy(networkBps = (s.networkBps + d * 5_000_000L).coerceAtLeast(0L)) },
         "prefetchCount" to Editor({ "${it.prefetchCount}" }) { s, d ->
             s.copy(prefetchCount = s.prefetchCount + d)
         },
@@ -385,15 +397,44 @@ class SetupActivity : Activity() {
                 if (section.note.isNotBlank()) container.addView(label(section.note, 13f, MUTED))
             }
             for (item in section.items) {
-                val editor = editors[item.key]
-                if (editor == null) {
-                    Log.e(TAG, "в settings-ui.json есть ${item.key}, а редактора для него нет")
-                    continue
+                for (row in rowsFor(item, editors)) {
+                    rows += row
+                    container.addView(rowView(row))
                 }
-                val row = Row(item.title, item.note, editor.show, editor.edit, editor.step)
-                rows += row
-                container.addView(rowView(row))
             }
+        }
+    }
+
+    /**
+     * Строки из одного описания: обычная — одна, «два бегунка» — по строке на
+     * ключ с подписью, «объём с переключателем» — бегунок с меняющимся
+     * названием и отдельная строка переключателя.
+     */
+    private fun rowsFor(item: SettingsUi.Item, editors: Map<String, Editor>): List<Row> {
+        fun row(key: String, title: (FrameSettings) -> String, hint: (FrameSettings) -> String): Row? {
+            val editor = editors[key]
+            if (editor == null) {
+                Log.e(TAG, "в settings-ui.json есть $key, а редактора для него нет")
+                return null
+            }
+            return Row(title, hint, editor.show, editor.edit, editor.step)
+        }
+        return when (item.kind) {
+            "dual" -> {
+                val labels = listOf(item.labels["first"].orEmpty(), item.labels["second"].orEmpty())
+                item.keys().mapIndexedNotNull { i, key ->
+                    row(key, { "${item.title}: ${labels.getOrElse(i) { "" }}" }, { item.note })
+                }
+            }
+            "capacity" -> listOfNotNull(
+                row(
+                    item.key,
+                    { if (it.storageByFree) item.alt?.title ?: item.title else item.title },
+                    { if (it.storageByFree) item.alt?.note ?: item.note else item.note },
+                ),
+                row("storageByFree", { item.labels["toggle"] ?: "По свободному месту" }, { "" }),
+            )
+            else -> listOfNotNull(row(item.key, { item.title }, { item.note }))
         }
     }
 
@@ -439,7 +480,8 @@ class SetupActivity : Activity() {
     private fun refresh() {
         val settings = store.current
         rows.forEach { row ->
-            row.view.text = "${row.title}   ·   ${row.show(settings)}\n${row.hint}"
+            val hint = row.hint(settings)
+            row.view.text = "${row.title(settings)}   ·   ${row.show(settings)}" + if (hint.isBlank()) "" else "\n$hint"
         }
     }
 
@@ -537,7 +579,11 @@ class SetupActivity : Activity() {
 
     private fun percent(value: Float) = "${Math.round(value * 100)} %"
 
-    private fun megabytes(bytes: Long) = "${bytes / 1024 / 1024} МБ"
+    private fun size(bytes: Long): String = when {
+        bytes >= 1_073_741_824L -> "%.1f ГБ".format(bytes / 1_073_741_824.0)
+        bytes >= 1_048_576L -> "${bytes / 1_048_576} МБ"
+        else -> "${bytes / 1024} КБ"
+    }
 
     private companion object {
         const val TAG = "YaPhotoFrame"

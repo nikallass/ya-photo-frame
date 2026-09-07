@@ -73,11 +73,32 @@ class TunerServer(
         Thread(runnable, "tuner-worker").apply { isDaemon = true }
     }
 
+    /**
+     * Порт после переустановки ещё с полминуты занят прежним процессом:
+     * заставка поднимается раньше, чем система отпустит его. Пробуем
+     * несколько раз, иначе страница до следующего запуска молчала бы.
+     */
+    private fun bind(): ServerSocket {
+        var attempt = 0
+        while (true) {
+            try {
+                return ServerSocket().apply {
+                    reuseAddress = true
+                    bind(java.net.InetSocketAddress(port))
+                }
+            } catch (e: java.net.BindException) {
+                if (++attempt >= BIND_ATTEMPTS) throw e
+                Log.w(TAG, "порт $port занят, попытка $attempt из $BIND_ATTEMPTS")
+                Thread.sleep(BIND_RETRY_MILLIS)
+            }
+        }
+    }
+
     fun start() {
         if (worker != null) return
         worker = thread(name = "tuner-server", isDaemon = true) {
             try {
-                ServerSocket(port).use { socket ->
+                bind().use { socket ->
                     serverSocket = socket
                     Log.i(TAG, "тюнер доступен на ${addresses().joinToString()}")
                     while (!socket.isClosed) {
@@ -282,7 +303,7 @@ class TunerServer(
         val filtered = ImportFilter.filter(values, hasVolume)
         if (filtered.size != values.size) {
             ru.dvedev.me.yaphotoframe.diag.Diary.note(
-                "перенос настроек: флешки ${values[ImportFilter.VOLUME_KEY]} на этом телевизоре нет, выбор тома оставлен прежним",
+                "перенос настроек: флешки ${ImportFilter.chosenVolume(values)} на этом телевизоре нет, место хранилища оставлено прежним",
             )
         }
         apply(filtered.entries.joinToString("&") { (key, raw) ->
@@ -324,10 +345,17 @@ class TunerServer(
                     ?: current.blurSampleLongSide,
                 tunerEnabled = values["tunerEnabled"]?.toBooleanStrictOrNull()
                     ?: current.tunerEnabled,
-                cacheBudgetBytes = values["cacheBudgetBytes"]?.toLongOrNull()
-                    ?: current.cacheBudgetBytes,
-                cacheItemThresholdBytes = values["cacheItemThresholdBytes"]?.toLongOrNull()
-                    ?: current.cacheItemThresholdBytes,
+                storageVolumeUuid = values["storageVolumeUuid"] ?: values["externalStorageUuid"]
+                    ?: current.storageVolumeUuid,
+                storageBytes = values["storageBytes"]?.toLongOrNull() ?: current.storageBytes,
+                storageByFree = values["storageByFree"]?.toBooleanStrictOrNull() ?: current.storageByFree,
+                storageReserveBytes = (values["storageReserveBytes"] ?: values["externalReserveBytes"])?.toLongOrNull()
+                    ?: current.storageReserveBytes,
+                minStorePhotoBytes = values["minStorePhotoBytes"]?.toLongOrNull() ?: current.minStorePhotoBytes,
+                minStoreVideoBytes = values["minStoreVideoBytes"]?.toLongOrNull() ?: current.minStoreVideoBytes,
+                maxFileBytes = (values["maxFileBytes"] ?: values["videoMaxSizeBytes"])?.toLongOrNull()
+                    ?: current.maxFileBytes,
+                networkBps = values["networkBps"]?.toLongOrNull() ?: current.networkBps,
                 prefetchCount = values["prefetchCount"]?.toIntOrNull() ?: current.prefetchCount,
                 indexRefreshIntervalMillis = values["indexRefreshIntervalMillis"]?.toLongOrNull()
                     ?: current.indexRefreshIntervalMillis,
@@ -338,15 +366,6 @@ class TunerServer(
                     ?: current.videoMaxDurationMillis,
                 videoSoundEnabled = values["videoSoundEnabled"]?.toBooleanStrictOrNull()
                     ?: current.videoSoundEnabled,
-                videoMaxSizeBytes = values["videoMaxSizeBytes"]?.toLongOrNull()
-                    ?: current.videoMaxSizeBytes,
-                streamBufferBytes = values["streamBufferBytes"]?.toLongOrNull()
-                    ?: current.streamBufferBytes,
-                streamMaxBitrateBps = values["streamMaxBitrateBps"]?.toLongOrNull()
-                    ?: current.streamMaxBitrateBps,
-                externalStorageUuid = values["externalStorageUuid"] ?: current.externalStorageUuid,
-                externalReserveBytes = values["externalReserveBytes"]?.toLongOrNull()
-                    ?: current.externalReserveBytes,
                 pairPortraits = values["pairPortraits"]?.toBooleanStrictOrNull()
                     ?: current.pairPortraits,
                 freshnessWindowDays = values["freshnessWindowDays"]?.toIntOrNull()
@@ -444,6 +463,8 @@ class TunerServer(
     companion object {
         const val DEFAULT_PORT = 8099
         private const val WORKER_THREADS = 4
+        private const val BIND_ATTEMPTS = 15
+        private const val BIND_RETRY_MILLIS = 4_000L
         private const val TAG = "YaPhotoFrame"
         private const val PAGE_ASSET = "tuner.html"
 

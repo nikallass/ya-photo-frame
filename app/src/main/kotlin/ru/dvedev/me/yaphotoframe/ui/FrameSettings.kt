@@ -1,7 +1,6 @@
 package ru.dvedev.me.yaphotoframe.ui
 
 import ru.dvedev.me.yaphotoframe.Defaults
-import ru.dvedev.me.yaphotoframe.cache.CachePolicy
 
 /**
  * Всё, чем задаётся поведение рамки.
@@ -103,11 +102,50 @@ data class FrameSettings(
      */
     val tunerEnabled: Boolean = true,
 
-    /** Сколько места отдано под кэш. */
-    val cacheBudgetBytes: Long = CachePolicy.DEFAULT_BUDGET_BYTES,
+    /**
+     * Где хранилище: пусто — память телевизора, иначе UUID тома флешки.
+     *
+     * Хранилище одно на снимки и видео. Выбор явный: чужую флешку, воткнутую
+     * на минуту, засыпать гигабайтами нельзя. Флешка помнится по тому, а не
+     * по пути: путь меняется от вставки к вставке. Пропала — рамка временно
+     * живёт в памяти телевизора.
+     */
+    val storageVolumeUuid: String = "",
 
-    /** Выше какого размера файл не кладут в кэш, а проигрывают потоком. */
-    val cacheItemThresholdBytes: Long = CachePolicy.DEFAULT_ITEM_THRESHOLD_BYTES,
+    /**
+     * Объём хранилища, когда он задан явно бегунком; для памяти телевизора
+     * умолчание два гигабайта. На флешке по умолчанию объём считается по
+     * свободному месту, и это поле не действует.
+     */
+    val storageBytes: Long = 2L * 1024 * 1024 * 1024,
+
+    /** Считать объём по свободному месту минус запас, а не по бегунку. */
+    val storageByFree: Boolean = false,
+
+    /** Сколько свободного места не трогать при объёме «по свободному месту». */
+    val storageReserveBytes: Long = 1024L * 1024 * 1024,
+
+    /**
+     * Снимки, чей оригинал легче стольких байт, в хранилище не кладутся, а
+     * качаются заново при каждом показе; ноль — хранить все.
+     */
+    val minStorePhotoBytes: Long = 0L,
+
+    /** Видео легче стольких байт не хранятся, а играют потоком; ноль — хранить все. */
+    val minStoreVideoBytes: Long = 0L,
+
+    /**
+     * Файл тяжелее стольких байт рамка пропускает: не качает, не стримит, не
+     * показывает. Ноль — без ограничения.
+     */
+    val maxFileBytes: Long = 2L * 1024 * 1024 * 1024,
+
+    /**
+     * Скорость сети до Диска, бит/с, заданная вручную; ноль — авто, по
+     * среднему трёх последних закачек. Решает судьбу видео, которое не
+     * помещается в хранилище: не выше скорости — потоком, выше — пропуск.
+     */
+    val networkBps: Long = 0L,
 
     /**
      * Как часто переобходить папку.
@@ -143,60 +181,11 @@ data class FrameSettings(
     val videoMaxDurationMillis: Long = 120_000L,
 
     /**
-     * Тяжелее скольких байт ролик не показывать; ноль — без ограничения.
+     * Качать ли, пока на экране видео.
      *
-     * Ролик тяжелее порога кэша идёт потоком, а канал телевизора не тянет
-     * битрейт съёмки с фотоаппарата: такой ролик заикается. Пережатых
-     * вариантов Диск не отдаёт, так что совсем тяжёлые проще не брать вовсе.
-     */
-    val videoMaxSizeBytes: Long = 0L,
-
-    /**
-     * Сколько места отдано под подкачку потока заранее; ноль — не подкачивать.
-     *
-     * Целиком тяжёлый ролик на телевизор не кладётся — места нет. Но его
-     * начало подкачивается в буфер этого объёма до показа, и на экран он
-     * выходит, когда начало на месте; чего не хватило — доигрывает потоком.
-     * Буфер общий и ограничен: череда роликов его не переполнит.
-     */
-    val streamBufferBytes: Long = 512L * 1024 * 1024,
-
-    /**
-     * Пропускная способность канала до Диска, бит/с; ноль — стримить всё.
-     *
-     * Ролик с битрейтом выше не идёт потоком: он бы заикался. Ему дорога
-     * через флешка, а без флешки он пропускается. Замерено на месте:
-     * телевизор берёт с Диска 8–12 МБ/с, то есть 64–96 Мбит/с; 40 — с
-     * запасом на соседей по сети.
-     */
-    val streamMaxBitrateBps: Long = 40_000_000L,
-
-    /**
-     * UUID тома флешки под тяжёлые ролики; пусто — флешки нет.
-     *
-     * Ролик тяжелее канала качается на неё один раз и идёт с неё без
-     * заиканий. Выбор явный: чужую флешку, воткнутую на минуту, засыпать
-     * гигабайтами нельзя. Помнится по тому, а не по пути: путь меняется от
-     * вставки к вставке.
-     */
-    val externalStorageUuid: String = "",
-
-    /**
-     * Сколько места на флешке не занимать.
-     *
-     * Занять можно всё свободное: флешка куплена под рамку, и число в
-     * гигабайтах владельцу вписывать незачем. Гигабайт остаётся на случай,
-     * если флешкой пользуются и для другого.
-     */
-    val externalReserveBytes: Long = 1024L * 1024 * 1024,
-
-    /**
-     * Качать ли, пока на экране ролик.
-     *
-     * По умолчанию да: подкачка ждёт только при потоковом ролике, который
-     * делит с ней сеть, остальное идёт как обычно. Выключают на слабом
-     * телевизоре или медленном интернете: тогда на время любого ролика
-     * стоят и подкачка, и закачка на флешку, и лёгкие ролики в кэш.
+     * По умолчанию да. Выключают на слабом телевизоре или медленном
+     * интернете: тогда на время любого видео закачки в хранилище стоят,
+     * снимки качаются всегда.
      */
     val downloadsDuringVideo: Boolean = true,
 
@@ -243,7 +232,7 @@ data class FrameSettings(
     val showDate: Boolean = true,
 
     /** На сколько кадров вперёд смотреть и что подгружать заранее. */
-    val prefetchCount: Int = CachePolicy.DEFAULT_PREFETCH_COUNT,
+    val prefetchCount: Int = 10,
 ) {
     /**
      * Все настройки по ключам JSON; порядок на странице задаёт settings-ui.json.
@@ -264,19 +253,20 @@ data class FrameSettings(
         "backgroundDim" to backgroundDim,
         "blurSampleLongSide" to blurSampleLongSide,
         "tunerEnabled" to tunerEnabled,
-        "cacheBudgetBytes" to cacheBudgetBytes,
-        "cacheItemThresholdBytes" to cacheItemThresholdBytes,
+        "storageVolumeUuid" to storageVolumeUuid,
+        "storageBytes" to storageBytes,
+        "storageByFree" to storageByFree,
+        "storageReserveBytes" to storageReserveBytes,
+        "minStorePhotoBytes" to minStorePhotoBytes,
+        "minStoreVideoBytes" to minStoreVideoBytes,
+        "maxFileBytes" to maxFileBytes,
+        "networkBps" to networkBps,
         "prefetchCount" to prefetchCount,
         "indexRefreshIntervalMillis" to indexRefreshIntervalMillis,
         "showVideo" to showVideo,
         "videoMaxDurationMillis" to videoMaxDurationMillis,
         "videoSoundEnabled" to videoSoundEnabled,
         "downloadsDuringVideo" to downloadsDuringVideo,
-        "videoMaxSizeBytes" to videoMaxSizeBytes,
-        "streamBufferBytes" to streamBufferBytes,
-        "streamMaxBitrateBps" to streamMaxBitrateBps,
-        "externalStorageUuid" to externalStorageUuid,
-        "externalReserveBytes" to externalReserveBytes,
         "pairPortraits" to pairPortraits,
         "freshnessWindowDays" to freshnessWindowDays,
         "minPhotoFraction" to minPhotoFraction,
@@ -289,13 +279,6 @@ data class FrameSettings(
     /** Доля экрана под кадр по его ориентации: вертикальному — своя. */
     fun insetFor(width: Int, height: Int): Float =
         if (height > width) frameInsetPortrait else frameInsetLandscape
-
-    /** То же самое в виде, понятном движку: он про экран ничего не знает. */
-    fun cachePolicy(): CachePolicy = CachePolicy(
-        budgetBytes = cacheBudgetBytes,
-        itemThresholdBytes = cacheItemThresholdBytes,
-        prefetchCount = prefetchCount,
-    )
 
     companion object {
         val MIN_SHOW_DURATION_MILLIS = 5_000L
