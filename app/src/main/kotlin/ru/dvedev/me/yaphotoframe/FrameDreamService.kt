@@ -352,7 +352,7 @@ class FrameDreamService : DreamService() {
     private val tvStorage: Storage by lazy {
         val root = File(cacheDir, STORAGE_DIRECTORY)
         migrateLegacyCache(root)
-        Storage(root = root, place = Storage.Place.TvMemory, capacity = ::capacity)
+        Storage(root = root, place = Storage.Place.TvMemory, capacity = ::tvCapacity)
     }
     private var flashStorage: Storage? = null
     private var flashVolume: ExternalMedia.Volume? = null
@@ -363,6 +363,15 @@ class FrameDreamService : DreamService() {
     /** Объём хранилища из настроек: бегунок или свободное место минус запас. */
     private fun capacity(): Storage.Capacity = store.current.let {
         if (it.storageByFree) Storage.Capacity.ByFree(it.storageReserveBytes) else Storage.Capacity.Fixed(it.storageBytes)
+    }
+
+    /**
+     * Объём памяти телевизора, когда она лишь запасное место при вынутой
+     * флешке: не больше бегунка. «По свободному месту» с запасом в полгига
+     * заполнило бы память телевизора до отказа, а она нужна и системе.
+     */
+    private fun tvCapacity(): Storage.Capacity = store.current.let {
+        if (it.storageVolumeUuid.isNotBlank()) Storage.Capacity.Fixed(it.storageBytes) else capacity()
     }
 
     /**
