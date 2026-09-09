@@ -120,6 +120,40 @@ class MediaCache(
     fun entries(): List<File> =
         directory.walkTopDown().filter { it.isFile && !it.name.endsWith(".part") }.toList()
 
+    /** Файл хранилища с размером — из одного обхода, без второго stat. */
+    class Scanned(val file: File, val bytes: Long)
+
+    /**
+     * Обход одним проходом: размер берётся из атрибутов, которые обход и так
+     * читает, — на флешке через FUSE каждый лишний stat стоит миллисекунды, а
+     * файлов тысячи. Недописанное от прерванных загрузок удаляется тут же,
+     * но только старое: свежий `.part` — это идущая закачка, удалённый
+     * из-под записи файл срывал её.
+     */
+    fun scan(): List<Scanned> {
+        val kept = ArrayList<Scanned>()
+        val stale = clock() - STALE_PART_MILLIS
+        val root = directory.toPath()
+        if (!java.nio.file.Files.isDirectory(root)) return kept
+        java.nio.file.Files.walkFileTree(root, object : java.nio.file.SimpleFileVisitor<java.nio.file.Path>() {
+            override fun visitFile(path: java.nio.file.Path, attrs: java.nio.file.attribute.BasicFileAttributes): java.nio.file.FileVisitResult {
+                if (attrs.isRegularFile) {
+                    val file = path.toFile()
+                    if (file.name.endsWith(".part")) {
+                        if (attrs.lastModifiedTime().toMillis() < stale) file.delete()
+                    } else {
+                        kept += Scanned(file, attrs.size())
+                    }
+                }
+                return java.nio.file.FileVisitResult.CONTINUE
+            }
+
+            override fun visitFileFailed(path: java.nio.file.Path, exc: java.io.IOException) =
+                java.nio.file.FileVisitResult.CONTINUE
+        })
+        return kept
+    }
+
     /** Удалить файл кэша вместе с опустевшими папками над ним. */
     fun delete(file: File): Boolean {
         val removed = file.isFile && file.delete()
@@ -134,6 +168,9 @@ class MediaCache(
     }
 
     companion object {
+        /** Недописанному старше часа закачка уже не грозит. */
+        const val STALE_PART_MILLIS = 60L * 60 * 1000
+
         /**
          * Бюджет «всё свободное минус запас» — для носителя.
          *

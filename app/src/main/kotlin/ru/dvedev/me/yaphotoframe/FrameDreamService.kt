@@ -411,6 +411,10 @@ class FrameDreamService : DreamService() {
     @Volatile
     private var flashChecking = false
 
+    /** Флешка выбрана, но её список файлов ещё читается: видео пока не качать, чтобы не качать дважды. */
+    @Volatile
+    private var flashWarming = false
+
     /** Проверяет том и, если он на месте, поднимает на нём хранилище. */
     private fun checkFlash(wanted: String) {
         // Пробная запись нужна, пока хранилище на флешке не поднято; потом
@@ -430,6 +434,15 @@ class FrameDreamService : DreamService() {
             File(root, Storage.PREVIEWS).mkdirs()
             runCatching { File(root, Storage.PREVIEWS + "/.nomedia").createNewFile() }
             fresh = Storage(root = root, place = Storage.Place.Flash(wanted, volume!!.label), capacity = ::capacity)
+            // Список файлов на флешке с тысячами копий читается через FUSE
+            // десятки секунд; пока он не прочитан, движку отдаётся память
+            // телевизора, а не хранилище, которое на каждый вопрос идёт к диску.
+            flashWarming = true
+            try {
+                fresh.warmUp()
+            } finally {
+                flashWarming = false
+            }
         }
         synchronized(this) {
             flashVolume = volume
@@ -589,6 +602,7 @@ class FrameDreamService : DreamService() {
                 gauge = gauge,
                 decodable = playback::decodable,
                 onDownload = ::reportDownload,
+                downloadsAllowed = { !flashWarming },
                 includeVideo = { store.current.showVideo },
                 minPhotoLongSide = ::minPhotoLongSide,
                 measure = { _, file -> imageLongSide(file) },
@@ -613,6 +627,7 @@ class FrameDreamService : DreamService() {
             val preparer = FramePreparer(
                 previewFile = engine::previewFile,
                 deliver = engine::deliver,
+                around = { block -> engine.whilePreparing(block) },
                 settings = { store.current },
                 minLongSide = ::minPhotoLongSide,
             )

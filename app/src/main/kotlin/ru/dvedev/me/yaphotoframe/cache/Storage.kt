@@ -59,43 +59,52 @@ class Storage(
 
     private var snapshot: Snapshot? = null
 
-    /** Идёт ли обход папки прямо сейчас — второй параллельно не нужен. */
-    private var refreshing = false
-
-    init {
-        cache.sweepLeftovers()
+    /**
+     * Список читается при первом обращении, вне замка: на флешке с тысячами
+     * файлов это десятки секунд, и держать всё это время «лежит ли файл»
+     * нельзя — первый кадр ждал бы обхода.
+     */
+    private fun current(): Snapshot {
+        peek()?.let { return it }
+        // Первый обход — один на всех: кто пришёл вторым, ждёт первого, а не
+        // запускает свой рядом с ним на той же флешке.
+        synchronized(readLock) {
+            peek()?.let { return it }
+            val fresh = read()
+            synchronized(this) { snapshot = fresh }
+            return fresh
+        }
     }
 
-    @Synchronized
-    private fun current(): Snapshot = snapshot ?: read().also { snapshot = it }
+    private val readLock = Any()
+
+    /**
+     * Читает список файлов заранее, чтобы первые же вопросы движка не ждали
+     * обхода. Зовётся с фонового потока до того, как хранилище отдано движку.
+     */
+    fun warmUp() {
+        current()
+    }
+
+    private fun peek(): Snapshot? = synchronized(this) { snapshot }
 
     /** Обход папки — вне замка, чтобы не держать движок, пока диск занят. */
     private fun read(): Snapshot {
-        val files = cache.entries().associateByTo(linkedMapOf()) { keyOf(it) }
-        return Snapshot(files, files.values.sumOf { it.length() }, usableSpace(), clock())
+        val scanned = cache.scan()
+        val files = scanned.associateByTo(linkedMapOf(), { keyOf(it.file) }, { it.file })
+        return Snapshot(files, scanned.sumOf { it.bytes }, usableSpace(), clock())
     }
 
     /**
-     * Перечитывает список с диска: место могли съесть снаружи, файлы —
-     * удалить руками. Зовётся движком между подготовками, не на показе.
-     *
-     * Не чаще раза в несколько минут и никогда двумя обходами разом: на
-     * флешке с тысячами файлов один обход через FUSE — десятки секунд, и
-     * наложившиеся обходы после каждого кадра клали телевизор целиком.
+     * Обновляет свободное место: его могли съесть снаружи. Сам список файлов
+     * с диска больше не перечитывается — он ведётся по своим записям, а обход
+     * флешки с тысячами файлов через FUSE длится минуты и тормозит показ.
+     * Файл, удалённый руками, обнаружится при обращении и выпадет из списка.
      */
     fun refresh() {
-        val started = synchronized(this) {
-            val snap = snapshot
-            val due = snap == null || clock() - snap.atMillis >= REFRESH_INTERVAL_MILLIS
-            if (!due || refreshing) return
-            refreshing = true
-        }
-        try {
-            val fresh = read()
-            synchronized(this) { snapshot = fresh }
-        } finally {
-            synchronized(this) { refreshing = false }
-        }
+        val snap = peek() ?: run { current(); return }
+        val usable = usableSpace()
+        synchronized(this) { snap.usable = usable }
     }
 
     @Synchronized
@@ -135,11 +144,21 @@ class Storage(
 
     // ── файлы ──
 
-    fun has(key: String): Boolean = synchronized(this) { current().files.containsKey(key) }
+    /** Пока список ещё не прочитан, спрашиваем у диска напрямую — это один stat, а не обход. */
+    fun has(key: String): Boolean {
+        val snap = synchronized(this) { snapshot } ?: return cache.has(key)
+        return synchronized(this) { snap.files.containsKey(key) }
+    }
 
     fun file(key: String): File {
+        val file = cache.file(key)
+        if (!file.isFile) {
+            // Удалили руками или флешку почистили: список об этом не знал.
+            synchronized(this) { snapshot?.files?.remove(key) }
+            return file
+        }
         cache.touch(key)
-        return cache.file(key)
+        return file
     }
 
     fun put(key: String, write: (File) -> Unit): File {
@@ -192,7 +211,12 @@ class Storage(
     }
 
     /** Поместится ли файл такого размера вообще — хоть после вытеснения всего. */
-    fun fits(bytes: Long): Boolean = bytes <= budgetBytes()
+    fun fits(bytes: Long): Boolean {
+        // Список ещё не прочитан — судим по свободному месту, без обхода:
+        // первому кадру обход ждать незачем.
+        val snap = peek() ?: return bytes <= budgetFor(0L, usableSpace())
+        return bytes <= budgetFor(snap.bytes, snap.usable)
+    }
 
     /** Есть ли место под файл прямо сейчас, без вытеснения. */
     private fun roomFor(bytes: Long, used: Long, usable: Long): Boolean =
@@ -204,7 +228,8 @@ class Storage(
      */
     fun makeRoom(bytes: Long): Boolean {
         if (!fits(bytes)) return false
-        val snap = current()
+        // До первого чтения списка вытеснять нечего и незачем: место есть.
+        val snap = peek() ?: return usableSpace() >= bytes + reserve()
         var used = snap.bytes
         var usable = snap.usable
         if (roomFor(bytes, used, usable)) return true
@@ -256,7 +281,5 @@ class Storage(
         const val PREVIEWS = "previews"
         const val VIDEOS = "videos"
 
-        /** Как часто перечитывать папку с диска. */
-        const val REFRESH_INTERVAL_MILLIS = 5L * 60 * 1000
     }
 }

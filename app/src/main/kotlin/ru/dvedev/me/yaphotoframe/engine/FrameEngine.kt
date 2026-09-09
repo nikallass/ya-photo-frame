@@ -83,6 +83,8 @@ class FrameEngine(
     private val prober: DurationProber = DurationProber.NONE,
     private val decodable: (String) -> Boolean = { true },
     private val onDownload: (DownloadEvent) -> Unit = {},
+    /** Можно ли сейчас качать видео: сервис говорит «нет», пока флешка ещё прогревается. */
+    private val downloadsAllowed: () -> Boolean = { true },
 ) {
 
     private val library = MediaLibrary(source, store, clock)
@@ -108,6 +110,9 @@ class FrameEngine(
 
     /** Не докачалось — до перезапуска второй раз не пробуем. */
     private val downloadFailed = mutableSetOf<String>()
+
+    /** Сколько кадров готовится прямо сейчас: пока хоть один — закачка видео стоит. */
+    private val preparing = java.util.concurrent.atomic.AtomicInteger(0)
 
     /**
      * Пока на экране видео, закачки видео в хранилище стоят (по настройке
@@ -422,7 +427,7 @@ class FrameEngine(
                     } else if (!storage().has(storage().videoKey(item.path))) {
                         // Видео качаются по одному: сеть одна, и два видео разом
                         // приехали бы позже, чем по очереди.
-                        if (!downloadRequested && !downloadsHeld) {
+                        if (!downloadRequested && !downloadsHeld && downloadsAllowed()) {
                             downloadRequested = true
                             startDownload(item)
                         }
@@ -551,7 +556,9 @@ class FrameEngine(
             throw java.io.IOException("в хранилище нет места под ${item.sizeBytes / 1_048_576} МБ")
         }
         val started = clock()
-        val file = fetcher.ensure(store, key, source.downloadUrl(item), onProgress)
+        val file = fetcher.ensure(store, key, source.downloadUrl(item), onProgress) { preparing.get() > 0 }
+        // Замер честный только для закачки, которая не стояла за кадрами;
+        // иначе он занижен, но в сторону осторожности — это допустимо.
         gauge.record(item.sizeBytes, clock() - started)
         return file
     }
@@ -586,14 +593,31 @@ class FrameEngine(
                 withContext(Dispatchers.IO) { store.makeRoom(PREVIEW_ROOM_BYTES) }
                 fetcher.ensure(store, key, url)
             }
-        return try {
-            fetch(preview.at(size))
-        } catch (e: HttpFailure) {
-            if (!e.isStaleLink) throw e
-            val refreshed = source.refresh(current) ?: throw e
-            val freshPreview = refreshed.preview ?: throw e
-            library.updateItem(refreshed)
-            fetch(freshPreview.at(size))
+        // Пока копия достаётся — закачка видео стоит: на флешке они делят
+        // один поток FUSE, и кадр иначе ждал бы минутами.
+        preparing.incrementAndGet()
+        try {
+            return try {
+                fetch(preview.at(size))
+            } catch (e: HttpFailure) {
+                if (!e.isStaleLink) throw e
+                val refreshed = source.refresh(current) ?: throw e
+                val freshPreview = refreshed.preview ?: throw e
+                library.updateItem(refreshed)
+                fetch(freshPreview.at(size))
+            }
+        } finally {
+            preparing.decrementAndGet()
+        }
+    }
+
+    /** Кадр декодируется из файла — на это время закачка видео тоже стоит. */
+    suspend fun <T> whilePreparing(block: suspend () -> T): T {
+        preparing.incrementAndGet()
+        try {
+            return block()
+        } finally {
+            preparing.decrementAndGet()
         }
     }
 

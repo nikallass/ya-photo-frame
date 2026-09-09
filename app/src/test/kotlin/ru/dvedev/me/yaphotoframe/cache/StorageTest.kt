@@ -96,6 +96,8 @@ class StorageTest {
         val s = storage(Storage.Capacity.Fixed(500L))
         s.write(s.previewKey("/старый.jpg", PreviewSize.FULL), 200)
         s.write(s.previewKey("/новый.jpg", PreviewSize.FULL), 200)
+        // До первого чтения списка вытеснять нечего: список читается здесь.
+        assertEquals(400L, s.usedBytes())
 
         assertTrue(s.makeRoom(250L))
 
@@ -119,11 +121,7 @@ class StorageTest {
         s.write(s.videoKey("/v2.mov"), 2_000)
         assertEquals("список прочитан, пока места хватало", 4_000L, s.usedBytes())
         usable = 0L  // диск заполнили снаружи: объём = 4000 − 1000 = 3000
-        // Список файлов и свободное место держатся в памяти и перечитываются
-        // по просьбе, но не чаще раза в несколько минут.
-        s.refresh()
-        assertEquals("рано — не перечитано", 0, s.evict())
-        now += Storage.REFRESH_INTERVAL_MILLIS
+        // Список файлов держится в памяти; свободное место перечитывается по просьбе.
         s.refresh()
         assertEquals(1, s.evict())
         assertEquals(2_000L, s.usedBytes())

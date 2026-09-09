@@ -84,8 +84,12 @@ class FramePreparer(
     private val settings: () -> FrameSettings,
     /** Мельче скольких пикселей по длинной стороне снимок не показывать; ноль — всё. */
     private val minLongSide: () -> Int = { 0 },
+    /** Обёртка вокруг подготовки — движок на это время останавливает закачки. */
+    private val around: suspend (suspend () -> PreparedItem) -> PreparedItem = { it() },
 ) {
-    suspend fun prepare(item: MediaItem): PreparedItem = withContext(Dispatchers.IO) {
+    suspend fun prepare(item: MediaItem): PreparedItem = around { prepareNow(item) }
+
+    private suspend fun prepareNow(item: MediaItem): PreparedItem = withContext(Dispatchers.IO) {
         when (item.kind) {
             MediaKind.VIDEO -> {
                 val delivery = deliver(item)

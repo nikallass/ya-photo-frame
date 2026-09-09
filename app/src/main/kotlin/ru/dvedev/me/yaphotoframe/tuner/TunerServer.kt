@@ -80,22 +80,33 @@ class TunerServer(
      */
     private fun bind(): ServerSocket {
         var attempt = 0
-        while (true) {
+        while (!closing) {
             try {
                 return ServerSocket().apply {
                     reuseAddress = true
                     bind(java.net.InetSocketAddress(port))
                 }
             } catch (e: java.net.BindException) {
-                if (++attempt >= BIND_ATTEMPTS) throw e
-                Log.w(TAG, "порт $port занят, попытка $attempt из $BIND_ATTEMPTS")
-                Thread.sleep(BIND_RETRY_MILLIS)
+                // Сколько бы ни ждать: страница без тюнера молчит до следующего
+                // запуска заставки, а порт рано или поздно освободится.
+                attempt++
+                if (attempt % BIND_LOG_EVERY == 1) Log.w(TAG, "порт $port занят, попытка $attempt")
+                try {
+                    Thread.sleep(BIND_RETRY_MILLIS)
+                } catch (interrupted: InterruptedException) {
+                    break
+                }
             }
         }
+        throw IOException("тюнер остановлен, не дождавшись порта $port")
     }
+
+    @Volatile
+    private var closing = false
 
     fun start() {
         if (worker != null) return
+        closing = false
         worker = thread(name = "tuner-server", isDaemon = true) {
             try {
                 bind().use { socket ->
@@ -131,12 +142,15 @@ class TunerServer(
     }
 
     fun stop() {
+        closing = true
         workers.shutdownNow()
         try {
             serverSocket?.close()
         } catch (e: IOException) {
             Log.d(TAG, "тюнер уже закрыт", e)
         }
+        // Ждёт порт — разбудить, чтобы вышел.
+        worker?.interrupt()
         worker = null
     }
 
@@ -463,7 +477,7 @@ class TunerServer(
     companion object {
         const val DEFAULT_PORT = 8099
         private const val WORKER_THREADS = 4
-        private const val BIND_ATTEMPTS = 15
+        private const val BIND_LOG_EVERY = 15
         private const val BIND_RETRY_MILLIS = 4_000L
         private const val TAG = "YaPhotoFrame"
         private const val PAGE_ASSET = "tuner.html"

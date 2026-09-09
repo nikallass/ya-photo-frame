@@ -22,14 +22,20 @@ class MediaFetcher(private val http: OkHttpClient) {
      * @param onProgress сколько байт уже записано; зовётся по ходу длинной
      *   загрузки, чтобы страница могла показать, как качается гигабайтное видео.
      */
+    /**
+     * @param yieldWhile пока возвращает true, закачка стоит: на флешке с NTFS
+     *   один поток FUSE, и чтение копии снимка для показа ждёт за записью
+     *   видео минутами. Кадр важнее закачки.
+     */
     suspend fun ensure(
         storage: Storage,
         key: String,
         url: String,
         onProgress: (Long) -> Unit = {},
+        yieldWhile: () -> Boolean = { false },
     ): File = withContext(Dispatchers.IO) {
         if (storage.has(key)) return@withContext storage.file(key)
-        download(url, onProgress) { write -> storage.put(key, write) }
+        download(url, onProgress, yieldWhile) { write -> storage.put(key, write) }
     }
 
     suspend fun ensure(
@@ -48,6 +54,7 @@ class MediaFetcher(private val http: OkHttpClient) {
     private suspend fun download(
         url: String,
         onProgress: (Long) -> Unit,
+        yieldWhile: () -> Boolean = { false },
         into: (write: (File) -> Unit) -> File,
     ): File {
         val request = Request.Builder().url(url).build()
@@ -64,6 +71,10 @@ class MediaFetcher(private val http: OkHttpClient) {
                     var reported = 0L
                     while (true) {
                         context.ensureActive()
+                        while (yieldWhile()) {
+                            Thread.sleep(YIELD_STEP_MILLIS)
+                            context.ensureActive()
+                        }
                         val read = input.read(buffer)
                         if (read < 0) break
                         out.write(buffer, 0, read)
@@ -84,5 +95,7 @@ class MediaFetcher(private val http: OkHttpClient) {
 
         /** Чаще, чем раз в мегабайт, сообщать незачем. */
         const val PROGRESS_STEP_BYTES = 1L * 1024 * 1024
+
+        const val YIELD_STEP_MILLIS = 50L
     }
 }
