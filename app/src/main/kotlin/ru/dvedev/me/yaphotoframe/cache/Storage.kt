@@ -59,6 +59,9 @@ class Storage(
 
     private var snapshot: Snapshot? = null
 
+    /** Идёт ли обход папки прямо сейчас — второй параллельно не нужен. */
+    private var refreshing = false
+
     init {
         cache.sweepLeftovers()
     }
@@ -75,10 +78,24 @@ class Storage(
     /**
      * Перечитывает список с диска: место могли съесть снаружи, файлы —
      * удалить руками. Зовётся движком между подготовками, не на показе.
+     *
+     * Не чаще раза в несколько минут и никогда двумя обходами разом: на
+     * флешке с тысячами файлов один обход через FUSE — десятки секунд, и
+     * наложившиеся обходы после каждого кадра клали телевизор целиком.
      */
     fun refresh() {
-        val fresh = read()
-        synchronized(this) { snapshot = fresh }
+        val started = synchronized(this) {
+            val snap = snapshot
+            val due = snap == null || clock() - snap.atMillis >= REFRESH_INTERVAL_MILLIS
+            if (!due || refreshing) return
+            refreshing = true
+        }
+        try {
+            val fresh = read()
+            synchronized(this) { snapshot = fresh }
+        } finally {
+            synchronized(this) { refreshing = false }
+        }
     }
 
     @Synchronized
@@ -238,5 +255,8 @@ class Storage(
     companion object {
         const val PREVIEWS = "previews"
         const val VIDEOS = "videos"
+
+        /** Как часто перечитывать папку с диска. */
+        const val REFRESH_INTERVAL_MILLIS = 5L * 60 * 1000
     }
 }

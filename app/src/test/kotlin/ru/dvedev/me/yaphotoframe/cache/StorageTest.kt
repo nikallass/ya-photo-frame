@@ -117,8 +117,13 @@ class StorageTest {
         val s = storage(Storage.Capacity.ByFree(1_000L))
         s.write(s.videoKey("/v1.mov"), 2_000)
         s.write(s.videoKey("/v2.mov"), 2_000)
+        assertEquals("список прочитан, пока места хватало", 4_000L, s.usedBytes())
         usable = 0L  // диск заполнили снаружи: объём = 4000 − 1000 = 3000
-        // Список файлов и свободное место держатся в памяти и перечитываются по просьбе.
+        // Список файлов и свободное место держатся в памяти и перечитываются
+        // по просьбе, но не чаще раза в несколько минут.
+        s.refresh()
+        assertEquals("рано — не перечитано", 0, s.evict())
+        now += Storage.REFRESH_INTERVAL_MILLIS
         s.refresh()
         assertEquals(1, s.evict())
         assertEquals(2_000L, s.usedBytes())

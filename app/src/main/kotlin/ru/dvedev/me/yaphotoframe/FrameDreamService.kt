@@ -255,6 +255,10 @@ class FrameDreamService : DreamService() {
     private fun startSlideshow() {
         slideshowJob?.cancel()
         watchdogJob?.cancel()
+        // Новому показу — полный срок на первый кадр. Раньше отметка прошлого
+        // показа оставалась, и после одного долгого старта сторож перезапускал
+        // показ каждые двадцать секунд, не давая первому кадру выйти вовсе.
+        lastDisplayAtMillis = android.os.SystemClock.elapsedRealtime()
         val job = scope.launch { runSlideshow() }
         slideshowJob = job
         // Цикл показа однажды тихо кончился, и рамка стояла на одном снимке:
@@ -400,7 +404,11 @@ class FrameDreamService : DreamService() {
 
     /** Проверяет том и, если он на месте, поднимает на нём хранилище. */
     private fun checkFlash(wanted: String) {
-        val volume = runCatching { media.volume(wanted) }.getOrNull()
+        // Пробная запись нужна, пока хранилище на флешке не поднято; потом
+        // достаточно видеть, что том смонтирован: каждая запись на флешке
+        // проходит через MediaProvider и стоит телевизору заметно.
+        val known = synchronized(this) { flashStorage }?.let { (it.place as Storage.Place.Flash).uuid == wanted } == true
+        val volume = runCatching { media.volume(wanted, probe = !known) }.getOrNull()
         val root = volume?.root
         val usable = volume != null && root != null && volume.usable
         val current = synchronized(this) { flashStorage }
@@ -408,6 +416,10 @@ class FrameDreamService : DreamService() {
         if (usable && (current == null || (current.place as Storage.Place.Flash).uuid != wanted)) {
             root!!.mkdirs()
             migrateLegacyFlash(root)
+            // Копии снимков — не для галереи телевизора: без этой пометки
+            // MediaProvider индексирует каждую из тысяч копий.
+            File(root, Storage.PREVIEWS).mkdirs()
+            runCatching { File(root, Storage.PREVIEWS + "/.nomedia").createNewFile() }
             fresh = Storage(root = root, place = Storage.Place.Flash(wanted, volume!!.label), capacity = ::capacity)
         }
         synchronized(this) {
@@ -1237,7 +1249,7 @@ class FrameDreamService : DreamService() {
         const val WATCHDOG_TICK_MILLIS = 20_000L
         const val CLOCK_SKEW_NOTE_MILLIS = 3_000L
         const val WATCHDOG_GRACE_MILLIS = 90_000L
-        const val FLASH_CHECK_MILLIS = 3_000L
+        const val FLASH_CHECK_MILLIS = 10_000L
         const val HISTORY_DEPTH = 10
         const val SKIP_NOTE_INTERVAL_MILLIS = 60_000L
 

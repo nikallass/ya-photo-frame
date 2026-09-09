@@ -121,8 +121,12 @@ class FrameEngine(
         downloadsHeld = held
     }
 
+    @Volatile
+    private var closed = false
+
     /** Останавливает закачки — когда движок больше не нужен. */
     fun close() {
+        closed = true
         workScope.cancel()
     }
 
@@ -384,6 +388,10 @@ class FrameEngine(
     suspend fun prefetch(): PrefetchOutcome = prefetchLock.withLock { doPrefetch() }
 
     private suspend fun doPrefetch(): PrefetchOutcome {
+        // Показ перезапустили — прежний движок закрыт, и его подготовка
+        // никому не нужна; иначе она продолжала бы качать и обходить диск
+        // рядом с новым движком.
+        if (closed) return PrefetchOutcome(0, 0, 0)
         var fetched = 0
         var streamed = 0
         var downloadRequested = false
@@ -395,6 +403,7 @@ class FrameEngine(
         for (pass in 0 until 2) {
         var changed = false
         for (item in upcoming()) {
+            if (closed) return PrefetchOutcome(fetched, streamed, 0)
             if (!handled.add(item.path)) continue
             try {
                 var plan = plan(item)

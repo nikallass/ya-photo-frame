@@ -35,7 +35,8 @@ class ExternalMedia(private val context: Context) {
         val usable: Boolean get() = problem == null && root != null
     }
 
-    fun volumes(): List<Volume> {
+    /** @param probe проверять ли запись на том пробным файлом; без пробы — только состояние тома. */
+    fun volumes(probe: Boolean = true): List<Volume> {
         val manager = context.getSystemService(StorageManager::class.java) ?: return emptyList()
         // Сама система заводит папку приложения на каждом примонтированном томе.
         val dirs = runCatching { context.externalMediaDirs }.getOrNull().orEmpty().filterNotNull()
@@ -44,12 +45,12 @@ class ExternalMedia(private val context: Context) {
             }.toMap()
         return runCatching { manager.storageVolumes }.getOrDefault(emptyList())
             .filter { it.isRemovable && it.uuid != null }
-            .map { volume -> describe(volume, dirs[volume.uuid]) }
+            .map { volume -> describe(volume, dirs[volume.uuid], probe) }
     }
 
-    fun volume(uuid: String): Volume? = volumes().firstOrNull { it.uuid == uuid }
+    fun volume(uuid: String, probe: Boolean = true): Volume? = volumes(probe).firstOrNull { it.uuid == uuid }
 
-    private fun describe(volume: StorageVolume, dir: File?): Volume {
+    private fun describe(volume: StorageVolume, dir: File?, probe: Boolean): Volume {
         val uuid = volume.uuid.orEmpty()
         val label = volume.getDescription(context) ?: uuid
         val state = volume.state
@@ -62,7 +63,8 @@ class ExternalMedia(private val context: Context) {
             state == Environment.MEDIA_CHECKING -> "подключается, подождите"
             state != Environment.MEDIA_MOUNTED -> "не подключён ($state)"
             root == null -> "система не дала рамке папку на этом томе"
-            else -> writeProbe(root)
+            probe -> writeProbe(root)
+            else -> null
         }
         return Volume(
             uuid = uuid,
