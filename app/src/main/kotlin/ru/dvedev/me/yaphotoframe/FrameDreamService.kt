@@ -358,6 +358,7 @@ class FrameDreamService : DreamService() {
     private var flashVolume: ExternalMedia.Volume? = null
     private var flashUuid: String? = null
     private var flashCheckedAt = 0L
+    private var flashRetryAtMillis = 0L
     private var flashMissingNoted = false
 
     /** Объём хранилища из настроек: бегунок или свободное место минус запас. */
@@ -394,12 +395,27 @@ class FrameDreamService : DreamService() {
         }
         val now = SystemClock.elapsedRealtime()
         val stale = flashUuid != wanted || now - flashCheckedAt >= FLASH_CHECK_MILLIS
-        if (stale && !flashChecking) {
+        if (stale && !flashChecking && now >= flashRetryAtMillis) {
             flashChecking = true
             flashCheckedAt = now
             scope.launch(Dispatchers.IO) {
                 try {
                     checkFlash(wanted)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // Флешка с побитой файловой системой: хранилище остаётся в
+                    // памяти телевизора, а не роняет заставку при каждом запуске.
+                    synchronized(this@FrameDreamService) {
+                        flashStorage = null
+                        flashUuid = wanted
+                        // Обход побитой флешки — минуты; пробовать снова не раньше, чем через десять.
+                        flashRetryAtMillis = SystemClock.elapsedRealtime() + FLASH_BROKEN_RETRY_MILLIS
+                        if (!flashMissingNoted) {
+                            Diary.problem("флешка $wanted не читается — хранилище пока в памяти телевизора; проверьте её на компьютере", e)
+                            flashMissingNoted = true
+                        }
+                    }
                 } finally {
                     synchronized(this@FrameDreamService) { flashChecking = false }
                 }
@@ -1274,6 +1290,7 @@ class FrameDreamService : DreamService() {
         const val CLOCK_SKEW_NOTE_MILLIS = 3_000L
         const val WATCHDOG_GRACE_MILLIS = 90_000L
         const val FLASH_CHECK_MILLIS = 10_000L
+        const val FLASH_BROKEN_RETRY_MILLIS = 10L * 60 * 1000
         const val HISTORY_DEPTH = 10
         const val SKIP_NOTE_INTERVAL_MILLIS = 60_000L
 

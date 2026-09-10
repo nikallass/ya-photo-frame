@@ -135,6 +135,24 @@ class MediaCache(
         val stale = clock() - STALE_PART_MILLIS
         val root = directory.toPath()
         if (!java.nio.file.Files.isDirectory(root)) return kept
+        // Флешка с побитой файловой системой отвечает ошибкой ввода-вывода на
+        // чтение папки; такая ошибка — про хранилище, а не про рамку, и
+        // ронять процесс не должна: обход отдаёт то, что успел собрать.
+        try {
+            walk(root, kept, stale)
+        } catch (e: java.io.IOException) {
+            throw StorageBroken(directory, e)
+        } catch (e: java.io.UncheckedIOException) {
+            throw StorageBroken(directory, e)
+        }
+        return kept
+    }
+
+    /** Папку хранилища не прочитать: ошибка ввода-вывода на диске. */
+    class StorageBroken(directory: File, cause: Throwable) :
+        java.io.IOException("не читается $directory: ${cause.message ?: cause.javaClass.simpleName}", cause)
+
+    private fun walk(root: java.nio.file.Path, kept: MutableList<Scanned>, stale: Long) {
         java.nio.file.Files.walkFileTree(root, object : java.nio.file.SimpleFileVisitor<java.nio.file.Path>() {
             override fun visitFile(path: java.nio.file.Path, attrs: java.nio.file.attribute.BasicFileAttributes): java.nio.file.FileVisitResult {
                 if (attrs.isRegularFile) {
@@ -150,8 +168,10 @@ class MediaCache(
 
             override fun visitFileFailed(path: java.nio.file.Path, exc: java.io.IOException) =
                 java.nio.file.FileVisitResult.CONTINUE
+
+            override fun postVisitDirectory(dir: java.nio.file.Path, exc: java.io.IOException?) =
+                java.nio.file.FileVisitResult.CONTINUE
         })
-        return kept
     }
 
     /** Удалить файл кэша вместе с опустевшими папками над ним. */
