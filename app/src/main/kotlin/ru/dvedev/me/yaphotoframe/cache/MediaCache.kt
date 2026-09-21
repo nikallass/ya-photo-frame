@@ -121,7 +121,7 @@ class MediaCache(
         directory.walkTopDown().filter { it.isFile && !it.name.endsWith(".part") }.toList()
 
     /** Файл хранилища с размером — из одного обхода, без второго stat. */
-    class Scanned(val file: File, val bytes: Long)
+    class Scanned(val file: File, val bytes: Long, val usedAtMillis: Long)
 
     /**
      * Обход одним проходом: размер берётся из атрибутов, которые обход и так
@@ -160,7 +160,7 @@ class MediaCache(
                     if (file.name.endsWith(".part")) {
                         if (attrs.lastModifiedTime().toMillis() < stale) file.delete()
                     } else {
-                        kept += Scanned(file, attrs.size())
+                        kept += Scanned(file, attrs.size(), attrs.lastModifiedTime().toMillis())
                     }
                 }
                 return java.nio.file.FileVisitResult.CONTINUE

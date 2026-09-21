@@ -21,6 +21,11 @@ import java.io.File
  * перечитывается с диска только по просьбе движка между подготовками
  * ([refresh]): обход папки на флешке во время закачки на неё же длится
  * секунды, и на горячем пути ему не место.
+ *
+ * Размер и давность каждого файла тоже в памяти. Когда флешка заполнилась,
+ * вытеснение идёт перед каждой закачкой, и сортировка десяти тысяч файлов,
+ * спрашивавшая у флешки время файла прямо в сравнении, занимала минуты —
+ * а шла десятками разом: показ вставал на одном кадре.
  */
 class Storage(
     val root: File,
@@ -49,9 +54,12 @@ class Storage(
 
     private val cache = MediaCache(root, ::budgetBytes, clock)
 
+    /** Файл хранилища, как его помнит список: размер и когда к нему обращались. */
+    private class Entry(val file: File, val bytes: Long, @Volatile var usedAtMillis: Long)
+
     /** Что лежит: ключ → файл, суммарный размер, свободное место на момент чтения. */
     private class Snapshot(
-        val files: MutableMap<String, File>,
+        val files: MutableMap<String, Entry>,
         var bytes: Long,
         var usable: Long,
         val atMillis: Long,
@@ -70,11 +78,27 @@ class Storage(
         // запускает свой рядом с ним на той же флешке.
         synchronized(readLock) {
             peek()?.let { return it }
+            synchronized(this) { journal = linkedMapOf() }
             val fresh = read()
-            synchronized(this) { snapshot = fresh }
+            synchronized(this) {
+                // Что записали и удалили, пока шёл обход, обход мог не увидеть:
+                // скачанное в эти секунды видео иначе считалось бы нескачанным.
+                journal?.forEach { (key, entry) ->
+                    fresh.files.remove(key)?.let { fresh.bytes -= it.bytes }
+                    if (entry != null) {
+                        fresh.files[key] = entry
+                        fresh.bytes += entry.bytes
+                    }
+                }
+                journal = null
+                snapshot = fresh
+            }
             return fresh
         }
     }
+
+    /** Записи и удаления за время первого обхода: ключ → файл, null — удалён. */
+    private var journal: MutableMap<String, Entry?>? = null
 
     private val readLock = Any()
 
@@ -91,7 +115,7 @@ class Storage(
     /** Обход папки — вне замка, чтобы не держать движок, пока диск занят. */
     private fun read(): Snapshot {
         val scanned = cache.scan()
-        val files = scanned.associateByTo(linkedMapOf(), { keyOf(it.file) }, { it.file })
+        val files = scanned.associateByTo(linkedMapOf(), { keyOf(it.file) }, { Entry(it.file, it.bytes, it.usedAtMillis) })
         return Snapshot(files, scanned.sumOf { it.bytes }, usableSpace(), clock())
     }
 
@@ -109,20 +133,25 @@ class Storage(
 
     @Synchronized
     private fun noteAdded(key: String, file: File) {
-        val snap = snapshot ?: return
+        val snap = snapshot ?: run {
+            journal?.put(key, Entry(file, file.length(), clock()))
+            return
+        }
         val size = file.length()
-        snap.files.put(key, file)?.let { snap.bytes -= it.length() }
+        snap.files.put(key, Entry(file, size, clock()))?.let { snap.bytes -= it.bytes }
         snap.bytes += size
         snap.usable = (snap.usable - size).coerceAtLeast(0L)
     }
 
     @Synchronized
-    private fun noteRemoved(key: String, size: Long) {
-        val snap = snapshot ?: return
-        if (snap.files.remove(key) != null) {
-            snap.bytes -= size
-            snap.usable += size
+    private fun noteRemoved(key: String) {
+        val snap = snapshot ?: run {
+            journal?.put(key, null)
+            return
         }
+        val gone = snap.files.remove(key) ?: return
+        snap.bytes -= gone.bytes
+        snap.usable += gone.bytes
     }
 
     @Synchronized
@@ -132,7 +161,7 @@ class Storage(
 
     /** Копия списка под сортировку — сам список правится под замком. */
     @Synchronized
-    private fun listed(snap: Snapshot): List<Pair<String, File>> = snap.files.entries.map { it.key to it.value }
+    private fun listed(snap: Snapshot): List<Pair<String, Entry>> = snap.files.entries.map { it.key to it.value }
 
     // ── ключи ──
 
@@ -146,18 +175,26 @@ class Storage(
 
     /** Пока список ещё не прочитан, спрашиваем у диска напрямую — это один stat, а не обход. */
     fun has(key: String): Boolean {
-        val snap = synchronized(this) { snapshot } ?: return cache.has(key)
-        return synchronized(this) { snap.files.containsKey(key) }
+        synchronized(this) {
+            snapshot?.let { return it.files.containsKey(key) }
+            journal?.let { if (it.containsKey(key)) return it[key] != null }
+        }
+        return cache.has(key)
     }
 
     fun file(key: String): File {
         val file = cache.file(key)
         if (!file.isFile) {
             // Удалили руками или флешку почистили: список об этом не знал.
-            synchronized(this) { snapshot?.files?.remove(key) }
+            noteRemoved(key)
             return file
         }
-        cache.touch(key)
+        val now = clock()
+        val entry = synchronized(this) { snapshot?.files?.get(key) }
+        // Отметка на диске нужна, чтобы давность пережила перезапуск, но
+        // запись на флешку стоит дорого: раз в сутки на файл достаточно.
+        if (entry == null || now - entry.usedAtMillis >= TOUCH_EVERY_MILLIS) cache.touch(key)
+        entry?.usedAtMillis = now
         return file
     }
 
@@ -168,9 +205,8 @@ class Storage(
     }
 
     fun remove(key: String): Boolean {
-        val size = cache.file(key).length()
         val removed = cache.remove(key)
-        if (removed) noteRemoved(key, size)
+        if (removed) noteRemoved(key)
         return removed
     }
 
@@ -194,7 +230,7 @@ class Storage(
     fun usedBytes(): Long = current().bytes
 
     fun usedBytes(kind: Kind): Long =
-        listed(current()).filter { kindOf(it.first) == kind }.sumOf { it.second.length() }
+        listed(current()).filter { kindOf(it.first) == kind }.sumOf { it.second.bytes }
 
     fun count(kind: Kind): Int = listed(current()).count { kindOf(it.first) == kind }
 
@@ -225,49 +261,58 @@ class Storage(
     /**
      * Освобождает место под файл: вытесняет самое старое по показу, сначала
      * видео, потом снимки, пока файл не поместится. Возвращает, поместился ли.
+     *
+     * Вытеснение одно на всех и с запасом: когда хранилище заполнено, место
+     * нужно перед каждой закачкой, и без запаса каждая копия снимка в двести
+     * килобайт запускала бы своё вытеснение.
      */
     fun makeRoom(bytes: Long): Boolean {
         if (!fits(bytes)) return false
         // До первого чтения списка вытеснять нечего и незачем: место есть.
-        val snap = peek() ?: return usableSpace() >= bytes + reserve()
-        var used = snap.bytes
-        var usable = snap.usable
-        if (roomFor(bytes, used, usable)) return true
-        for ((key, file) in victims(snap)) {
-            if (roomFor(bytes, used, usable)) break
-            val size = file.length()
-            if (cache.delete(file)) {
-                noteRemoved(key, size)
-                used -= size
-                usable += size
+        val first = peek() ?: return usableSpace() >= bytes + reserve()
+        if (roomFor(bytes, first.bytes, first.usable)) return true
+        synchronized(evictLock) {
+            val snap = peek() ?: return true
+            var used = snap.bytes
+            var usable = snap.usable
+            if (roomFor(bytes, used, usable)) return true
+            val wanted = bytes + minOf(HEADROOM_MAX_BYTES, budgetFor(used, usable) / HEADROOM_SHARE)
+            for ((key, entry) in victims(snap)) {
+                if (roomFor(wanted, used, usable)) break
+                if (cache.delete(entry.file) || !entry.file.exists()) {
+                    noteRemoved(key)
+                    used -= entry.bytes
+                    usable += entry.bytes
+                }
             }
+            return roomFor(bytes, used, usable)
         }
-        return roomFor(bytes, used, usable)
     }
 
+    private val evictLock = Any()
+
     /** Ужимает хранилище до объёма, если объём уменьшили или место на диске съел кто-то другой. */
-    fun evict(): Int {
+    fun evict(): Int = synchronized(evictLock) {
         val snap = current()
         var used = snap.bytes
         var usable = snap.usable
         if (used <= budgetFor(used, usable)) return 0
         var removed = 0
-        for ((key, file) in victims(snap)) {
+        for ((key, entry) in victims(snap)) {
             if (used <= budgetFor(used, usable)) break
-            val size = file.length()
-            if (cache.delete(file)) {
-                noteRemoved(key, size)
-                used -= size
-                usable += size
+            if (cache.delete(entry.file) || !entry.file.exists()) {
+                noteRemoved(key)
+                used -= entry.bytes
+                usable += entry.bytes
                 removed++
             }
         }
-        return removed
+        removed
     }
 
-    /** Кого вытеснять первым: видео, затем самое давнее по показу. */
-    private fun victims(snap: Snapshot): List<Pair<String, File>> =
-        listed(snap).sortedWith(compareBy({ kindOf(it.first) != Kind.VIDEO }, { it.second.lastModified() }))
+    /** Кого вытеснять первым: видео, затем самое давнее по показу. Всё из памяти, без обращений к диску. */
+    private fun victims(snap: Snapshot): List<Pair<String, Entry>> =
+        listed(snap).sortedWith(compareBy({ kindOf(it.first) != Kind.VIDEO }, { it.second.usedAtMillis }))
 
     private fun reserve(): Long = (capacity() as? Capacity.ByFree)?.reserveBytes ?: 0L
 
@@ -281,5 +326,11 @@ class Storage(
         const val PREVIEWS = "previews"
         const val VIDEOS = "videos"
 
+        /** Сколько освобождать сверх нужного: двадцатая часть объёма, но не больше полугигабайта. */
+        const val HEADROOM_SHARE = 20
+        const val HEADROOM_MAX_BYTES = 512L * 1024 * 1024
+
+        /** Как часто обновлять отметку давности на диске. */
+        const val TOUCH_EVERY_MILLIS = 24L * 60 * 60 * 1000
     }
 }

@@ -590,7 +590,8 @@ class FrameEngine(
         val key = if (fresh) CacheKey.forPreview(item, size) else store.previewKey(item, size)
         suspend fun fetch(url: String): File =
             if (fresh) fetcher.ensure(scratch, key, url) else {
-                withContext(Dispatchers.IO) { store.makeRoom(PREVIEW_ROOM_BYTES) }
+                // Место нужно только под то, чего ещё нет.
+                if (!store.has(key)) withContext(Dispatchers.IO) { store.makeRoom(PREVIEW_ROOM_BYTES) }
                 fetcher.ensure(store, key, url)
             }
         // Пока копия достаётся — закачка видео стоит: на флешке они делят

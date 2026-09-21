@@ -106,6 +106,34 @@ class StorageTest {
     }
 
     @Test
+    fun `вытеснение идёт с запасом — следующей мелкой закачке оно не нужно`() {
+        val s = storage(Storage.Capacity.Fixed(10_000L))
+        repeat(10) { s.write(s.previewKey("/$it.jpg", PreviewSize.FULL), 1_000) }
+        assertEquals(10_000L, s.usedBytes())
+
+        assertTrue(s.makeRoom(100L))
+        assertEquals("ушёл один, самый старый", 9, s.count(Storage.Kind.PHOTO))
+        assertFalse(s.has(s.previewKey("/0.jpg", PreviewSize.FULL)))
+
+        assertTrue(s.makeRoom(100L))
+        assertEquals("второй раз вытеснять нечего", 9, s.count(Storage.Kind.PHOTO))
+    }
+
+    @Test
+    fun `обращение к файлу отодвигает его вытеснение`() {
+        val s = storage(Storage.Capacity.Fixed(3_000L))
+        repeat(3) { s.write(s.previewKey("/$it.jpg", PreviewSize.FULL), 1_000) }
+        s.usedBytes()
+        now += 1_000
+        s.file(s.previewKey("/0.jpg", PreviewSize.FULL))
+
+        assertTrue(s.makeRoom(500L))
+
+        assertTrue("показанный только что остался", s.has(s.previewKey("/0.jpg", PreviewSize.FULL)))
+        assertFalse("ушёл самый давний", s.has(s.previewKey("/1.jpg", PreviewSize.FULL)))
+    }
+
+    @Test
     fun `файл больше объёма не помещается никогда`() {
         val s = storage(Storage.Capacity.Fixed(1_000L))
         s.write(s.videoKey("/v.mov"), 300)
