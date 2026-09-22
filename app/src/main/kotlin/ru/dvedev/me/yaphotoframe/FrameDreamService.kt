@@ -1091,6 +1091,13 @@ class FrameDreamService : DreamService() {
                 if (stalls <= STALLS_TO_NOTE) {
                     Diary.note("видео ${prepared.item.name} встало на подкачку ($stalls)")
                 }
+                // Первое заикание — закачки замирают до конца этого видео:
+                // на флешке они делят с показом один поток записи. Следующий
+                // кадр снимет удержание сам.
+                if (stalls == 1 && store.current.pauseDownloadsOnStall && store.current.downloadsDuringVideo) {
+                    engine?.holdDownloads(true)
+                    Diary.note("закачки стоят до конца ${prepared.item.name}")
+                }
             },
         )
     }

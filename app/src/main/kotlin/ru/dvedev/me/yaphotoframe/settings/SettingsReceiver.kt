@@ -78,6 +78,8 @@ class SettingsReceiver : BroadcastReceiver() {
             "showVideo" -> raw.toBooleanStrictOrNull()?.let { settings.copy(showVideo = it) }
             "downloadsDuringVideo" ->
                 raw.toBooleanStrictOrNull()?.let { settings.copy(downloadsDuringVideo = it) }
+            "pauseDownloadsOnStall" ->
+                raw.toBooleanStrictOrNull()?.let { settings.copy(pauseDownloadsOnStall = it) }
             "videoMaxDurationMillis" ->
                 raw.toLongOrNull()?.let { settings.copy(videoMaxDurationMillis = it) }
             "videoSoundEnabled" ->

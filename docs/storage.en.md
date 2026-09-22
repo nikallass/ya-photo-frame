@@ -41,6 +41,7 @@ Section **"Media files"**:
 | **File no heavier than** | `maxFileBytes` | 2 GB | A file heavier than the threshold is skipped: not downloaded, not streamed, not shown. Zero — no limit. |
 | **Don't keep photos lighter than** | `minStorePhotoBytes` | 0 | A photo lighter than the threshold is not put into storage but downloaded anew for every show. Zero — keep everything. Photo copies weigh about 200 KB: a higher threshold turns off keeping photos, and the frame has nothing to show without network. Videos are not affected — a video is kept or streamed by bitrate (step F). |
 | Downloads during video | `downloadsDuringVideo` | on | Off stops video downloads while a video is on screen; photos are always downloaded. |
+| Downloads pause on stall | `pauseDownloadsOnStall` | on | After the first stall of a video the running download pauses (without cancelling) until that video ends: on a flash drive the download and playback share one write thread. |
 
 Section **"Storage"**:
 

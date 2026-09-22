@@ -196,6 +196,13 @@ data class FrameSettings(
     val downloadsDuringVideo: Boolean = true,
 
     /**
+     * Останавливать ли закачки после первого заикания видео на экране —
+     * до конца этого видео. Заикание чаще всего и вызвано закачкой: на
+     * флешке она делит с показом один поток записи.
+     */
+    val pauseDownloadsOnStall: Boolean = true,
+
+    /**
      * Со звуком ли.
      *
      * По умолчанию нет: заставка, внезапно заговорившая в тишине, пугает.
@@ -273,6 +280,7 @@ data class FrameSettings(
         "videoMaxDurationMillis" to videoMaxDurationMillis,
         "videoSoundEnabled" to videoSoundEnabled,
         "downloadsDuringVideo" to downloadsDuringVideo,
+        "pauseDownloadsOnStall" to pauseDownloadsOnStall,
         "pairPortraits" to pairPortraits,
         "freshnessWindowDays" to freshnessWindowDays,
         "minPhotoFraction" to minPhotoFraction,

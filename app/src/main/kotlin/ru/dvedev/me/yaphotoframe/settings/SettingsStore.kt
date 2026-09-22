@@ -83,6 +83,7 @@ class SettingsStore(context: Context) {
                 ?: defaults.selectedFolders,
             showVideo = prefs.getBoolean(KEY_VIDEO, defaults.showVideo),
             downloadsDuringVideo = prefs.getBoolean(KEY_DOWNLOADS_DURING_VIDEO, defaults.downloadsDuringVideo),
+            pauseDownloadsOnStall = prefs.getBoolean(KEY_PAUSE_ON_STALL, defaults.pauseDownloadsOnStall),
             videoMaxDurationMillis =
                 prefs.getLong(KEY_VIDEO_MAX, defaults.videoMaxDurationMillis),
             videoSoundEnabled = prefs.getBoolean(KEY_VIDEO_SOUND, defaults.videoSoundEnabled),
@@ -144,6 +145,7 @@ class SettingsStore(context: Context) {
             .putStringSet(KEY_FOLDERS, value.selectedFolders)
             .putBoolean(KEY_VIDEO, value.showVideo)
             .putBoolean(KEY_DOWNLOADS_DURING_VIDEO, value.downloadsDuringVideo)
+            .putBoolean(KEY_PAUSE_ON_STALL, value.pauseDownloadsOnStall)
             .putLong(KEY_VIDEO_MAX, value.videoMaxDurationMillis)
             .putBoolean(KEY_VIDEO_SOUND, value.videoSoundEnabled)
             .putBoolean(KEY_PAIRS, value.pairPortraits)
@@ -198,6 +200,7 @@ class SettingsStore(context: Context) {
         const val KEY_FOLDERS = "selected_folders"
         const val KEY_VIDEO = "show_video"
         const val KEY_DOWNLOADS_DURING_VIDEO = "downloads_during_video"
+        const val KEY_PAUSE_ON_STALL = "pause_downloads_on_stall"
         const val KEY_VIDEO_MAX = "video_max_duration_millis"
         const val KEY_VIDEO_SOUND = "video_sound_enabled"
         const val KEY_PAIRS = "pair_portraits"
@@ -244,6 +247,7 @@ fun FrameSettings.sanitized(): FrameSettings {
         selectedFolders = selectedFolders.filter { it.isNotBlank() }.toSet(),
         showVideo = showVideo,
         downloadsDuringVideo = downloadsDuringVideo,
+        pauseDownloadsOnStall = pauseDownloadsOnStall,
         videoMaxDurationMillis = videoMaxDurationMillis.coerceIn(0L, 60L * 60 * 1000),
         videoSoundEnabled = videoSoundEnabled,
         pairPortraits = pairPortraits,

@@ -156,6 +156,7 @@ the app (Russian).
 | `videoMaxDurationMillis` | 120 000 | 0 … 1 h | "Видео не дольше": how long to hold a video; 0 — to the end |
 | `videoSoundEnabled` | `false` | — | "Звук в видео" |
 | `downloadsDuringVideo` | `true` | — | "Закачки во время видео": turn off on a weak TV or slow internet, then video downloads pause while a video is on screen; photos are always downloaded |
+| `pauseDownloadsOnStall` | `true` | — | "Закачки стоят при заикании": after the first stall of a video the running download pauses until that video ends |
 | `maxFileBytes` | 2 GB | 0 … 64 GB | "Файл не тяжелее": heavier is skipped without downloading; 0 — no limit (old key `videoMaxSizeBytes` accepted) |
 | `minStorePhotoBytes` | 0 | 0 … 1 GB | "Не хранить снимки легче": a lighter photo is not put into storage and is downloaded anew for every show; 0 — keep all |
 | `redownloadAfterDays` | 7 | 0 … 365 | "Не перекачивать": an evicted video is not downloaded again for that many days; 0 — at once |

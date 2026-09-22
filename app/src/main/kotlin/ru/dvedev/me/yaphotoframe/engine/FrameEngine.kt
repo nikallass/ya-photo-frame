@@ -117,8 +117,10 @@ class FrameEngine(
 
     /**
      * Пока на экране видео, закачки видео в хранилище стоят (по настройке
-     * «Закачки во время видео»). Снимки качаются всегда: очередь не должна
-     * опустеть за минуту видео.
+     * «Закачки во время видео» или после первого заикания). Новые не
+     * начинаются, идущая замирает — на флешке она делит с показом один
+     * поток записи. Снимки качаются всегда: очередь не должна опустеть за
+     * минуту видео.
      */
     @Volatile
     private var downloadsHeld = false
@@ -126,6 +128,10 @@ class FrameEngine(
     fun holdDownloads(held: Boolean) {
         downloadsHeld = held
     }
+
+    /** Закачку держали — сорвавшийся за это время сервер не повод для приговора. */
+    @Volatile
+    private var heldWhileDownloading = false
 
     @Volatile
     private var closed = false
@@ -544,12 +550,19 @@ class FrameEngine(
         } catch (e: Exception) {
             coroutineContext.ensureActive()
             val reason = e.message ?: e.javaClass.simpleName
-            synchronized(failures) { failures[item.path] = reason }
-            synchronized(downloadLock) { downloadFailed += item.path }
-            queueLock.withLock { queue.remove(item.path) }
-            onDownload(DownloadEvent.Failed(item, reason))
+            // Пока закачка стояла, сервер мог закрыть соединение: это не
+            // беда файла, попробуем его снова следующей подготовкой.
+            if (heldWhileDownloading) {
+                onDownload(DownloadEvent.Failed(item, "$reason (закачка стояла — повторю)"))
+            } else {
+                synchronized(failures) { failures[item.path] = reason }
+                synchronized(downloadLock) { downloadFailed += item.path }
+                queueLock.withLock { queue.remove(item.path) }
+                onDownload(DownloadEvent.Failed(item, reason))
+            }
         } finally {
             downloading = null
+            heldWhileDownloading = false
         }
     }
 
@@ -564,7 +577,11 @@ class FrameEngine(
             throw java.io.IOException("в хранилище нет места под ${item.sizeBytes / 1_048_576} МБ")
         }
         val started = clock()
-        val file = fetcher.ensure(store, key, source.downloadUrl(item), onProgress) { preparing.get() > 0 }
+        val file = fetcher.ensure(store, key, source.downloadUrl(item), onProgress) {
+            val hold = preparing.get() > 0 || downloadsHeld
+            if (downloadsHeld) heldWhileDownloading = true
+            hold
+        }
         // Скачано заново — срок «не перекачивать» снят.
         if (entryOf(item.path)?.evictedAtMillis != null) library.recordEvicted(item.path, null)
         // Замер честный только для закачки, которая не стояла за кадрами;

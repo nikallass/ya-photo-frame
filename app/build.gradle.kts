@@ -23,8 +23,8 @@ android {
         applicationId = "ru.dvedev.me.yaphotoframe"
         minSdk = 26
         targetSdk = 35
-        versionCode = 50
-        versionName = "1.5.0"
+        versionCode = 51
+        versionName = "1.5.1"
     }
 
     buildFeatures {
