@@ -108,7 +108,7 @@ class SettingsStore(context: Context) {
                 prefs.getLong(KEY_OLD_EXTERNAL_RESERVE, defaults.storageReserveBytes),
             ),
             minStorePhotoBytes = prefs.getLong(KEY_MIN_STORE_PHOTO, defaults.minStorePhotoBytes),
-            minStoreVideoBytes = prefs.getLong(KEY_MIN_STORE_VIDEO, defaults.minStoreVideoBytes),
+            redownloadAfterDays = prefs.getInt(KEY_REDOWNLOAD_DAYS, defaults.redownloadAfterDays),
             maxFileBytes = prefs.getLong(KEY_MAX_FILE, prefs.getLong(KEY_OLD_VIDEO_MAX_SIZE, defaults.maxFileBytes)),
             networkBps = prefs.getLong(KEY_NETWORK, defaults.networkBps),
             indexRefreshIntervalMillis =
@@ -157,7 +157,7 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_STORAGE_BY_FREE, value.storageByFree)
             .putLong(KEY_STORAGE_RESERVE, value.storageReserveBytes)
             .putLong(KEY_MIN_STORE_PHOTO, value.minStorePhotoBytes)
-            .putLong(KEY_MIN_STORE_VIDEO, value.minStoreVideoBytes)
+            .putInt(KEY_REDOWNLOAD_DAYS, value.redownloadAfterDays)
             .putLong(KEY_MAX_FILE, value.maxFileBytes)
             .putLong(KEY_NETWORK, value.networkBps)
             .putLong(KEY_REFRESH, value.indexRefreshIntervalMillis)
@@ -184,7 +184,7 @@ class SettingsStore(context: Context) {
         const val KEY_STORAGE_BY_FREE = "storage_by_free"
         const val KEY_STORAGE_RESERVE = "storage_reserve_bytes"
         const val KEY_MIN_STORE_PHOTO = "min_store_photo_bytes"
-        const val KEY_MIN_STORE_VIDEO = "min_store_video_bytes"
+        const val KEY_REDOWNLOAD_DAYS = "redownload_after_days"
         const val KEY_MAX_FILE = "max_file_bytes"
         const val KEY_NETWORK = "network_bps"
         /** Ключи до 1.4 — читаются один раз для переноса. */
@@ -257,7 +257,7 @@ fun FrameSettings.sanitized(): FrameSettings {
         storageByFree = storageByFree,
         storageReserveBytes = storageReserveBytes.coerceIn(0L, 1024L * 1024 * 1024 * 1024),
         minStorePhotoBytes = minStorePhotoBytes.coerceIn(0L, 1024L * 1024 * 1024),
-        minStoreVideoBytes = minStoreVideoBytes.coerceIn(0L, 64L * 1024 * 1024 * 1024),
+        redownloadAfterDays = redownloadAfterDays.coerceIn(0, 365),
         maxFileBytes = maxFileBytes.coerceIn(0L, 64L * 1024 * 1024 * 1024),
         networkBps = networkBps.coerceIn(0L, 2_000_000_000L),
         // Не реже трёх часов: столько живут ссылки Диска на превью.

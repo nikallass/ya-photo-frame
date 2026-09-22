@@ -352,7 +352,7 @@ class FrameDreamService : DreamService() {
     private val tvStorage: Storage by lazy {
         val root = File(cacheDir, STORAGE_DIRECTORY)
         migrateLegacyCache(root)
-        Storage(root = root, place = Storage.Place.TvMemory, capacity = ::tvCapacity)
+        Storage(root = root, place = Storage.Place.TvMemory, capacity = ::tvCapacity, onEvicted = ::noteEvicted)
     }
     private var flashStorage: Storage? = null
     private var flashVolume: ExternalMedia.Volume? = null
@@ -360,6 +360,11 @@ class FrameDreamService : DreamService() {
     private var flashCheckedAt = 0L
     private var flashRetryAtMillis = 0L
     private var flashMissingNoted = false
+
+    /** Хранилище вытеснило файл — движок запомнит, чтобы не качать видео заново раньше срока. */
+    private fun noteEvicted(key: String) {
+        engine?.noteEvicted(key)
+    }
 
     /** Объём хранилища из настроек: бегунок или свободное место минус запас. */
     private fun capacity(): Storage.Capacity = store.current.let {
@@ -449,7 +454,10 @@ class FrameDreamService : DreamService() {
             // MediaProvider индексирует каждую из тысяч копий.
             File(root, Storage.PREVIEWS).mkdirs()
             runCatching { File(root, Storage.PREVIEWS + "/.nomedia").createNewFile() }
-            fresh = Storage(root = root, place = Storage.Place.Flash(wanted, volume!!.label), capacity = ::capacity)
+            fresh = Storage(
+                root = root, place = Storage.Place.Flash(wanted, volume!!.label), capacity = ::capacity,
+                onEvicted = ::noteEvicted,
+            )
             // Список файлов на флешке с тысячами копий читается через FUSE
             // десятки секунд; пока он не прочитан, движку отдаётся память
             // телевизора, а не хранилище, которое на каждый вопрос идёт к диску.
@@ -625,7 +633,7 @@ class FrameDreamService : DreamService() {
                 selection = ::currentSelection,
                 maxFileBytes = { store.current.maxFileBytes },
                 minStorePhotoBytes = { store.current.minStorePhotoBytes },
-                minStoreVideoBytes = { store.current.minStoreVideoBytes },
+                redownloadAfterDays = { store.current.redownloadAfterDays },
                 networkBps = { store.current.networkBps },
                 tuning = {
                     PlaylistTuning(

@@ -322,8 +322,8 @@ const SLIDERS = {
   minStorePhotoBytes: { min: 0, max: 2048, step: 16, get: v => Math.round(v / 1024), set: s => s * 1024,
     show: v => !v ? 'хранить все' : size(v) },
 
-  minStoreVideoBytes: { min: 0, max: 4096, step: 16, get: v => Math.round(v / 1048576), set: s => s * 1048576,
-    show: v => !v ? 'хранить все' : size(v) },
+  redownloadAfterDays: { min: 0, max: 60, step: 1, get: v => v, set: s => s,
+    show: v => v ? v + ' дн.' : 'сразу' },
 
   // Потолок обоих — размер выбранного диска; страница подставляет его из списка томов.
   storageBytes: { min: 0, max: 65536, step: 256, get: v => Math.round(v / 1048576), set: s => s * 1048576,

@@ -350,9 +350,9 @@ class SetupActivity : Activity() {
         "minStorePhotoBytes" to Editor(
             { if (it.minStorePhotoBytes <= 0) "хранить все" else size(it.minStorePhotoBytes) },
         ) { s, d -> s.copy(minStorePhotoBytes = (s.minStorePhotoBytes + d * 16L * 1024).coerceAtLeast(0L)) },
-        "minStoreVideoBytes" to Editor(
-            { if (it.minStoreVideoBytes <= 0) "хранить все" else size(it.minStoreVideoBytes) },
-        ) { s, d -> s.copy(minStoreVideoBytes = (s.minStoreVideoBytes + d * 16L * 1_048_576).coerceAtLeast(0L)) },
+        "redownloadAfterDays" to Editor(
+            { if (it.redownloadAfterDays <= 0) "сразу" else "${it.redownloadAfterDays} дн." },
+        ) { s, d -> s.copy(redownloadAfterDays = (s.redownloadAfterDays + d).coerceIn(0, 365)) },
         "storageVolumeUuid" to Editor({ describeVolume(it.storageVolumeUuid) }) { s, d ->
             s.copy(storageVolumeUuid = nextVolume(s.storageVolumeUuid, d))
         },

@@ -98,6 +98,7 @@ class MediaLibrary(
                 durationMillis = known?.durationMillis,
                 codec = known?.codec,
                 undecodable = known?.undecodable ?: false,
+                evictedAtMillis = known?.evictedAtMillis,
             )
         }
 
@@ -192,6 +193,18 @@ class MediaLibrary(
 
         val updated = snapshot.entries.toMutableList()
         updated[index] = updated[index].copy(undecodable = true)
+        snapshot = snapshot.copy(entries = updated)
+        scheduleSave()
+    }
+
+    /** Видео вытеснили из хранилища; null — снова скачано, срок снят. */
+    @Synchronized
+    fun recordEvicted(path: String, atMillis: Long?) {
+        val index = snapshot.entries.indexOfFirst { it.item.path == path }
+        if (index < 0) return
+
+        val updated = snapshot.entries.toMutableList()
+        updated[index] = updated[index].copy(evictedAtMillis = atMillis)
         snapshot = snapshot.copy(entries = updated)
         scheduleSave()
     }

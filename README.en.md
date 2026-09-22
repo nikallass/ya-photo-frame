@@ -72,10 +72,14 @@ The page and the app are in Russian.
   storage is downloaded whole, one at a time, and plays from disk without
   stutter; until it has finished downloading the show goes past it. A video
   that does not fit even after eviction is streamed if its bitrate is not
-  above the network speed and skipped if it is. The frame measures the network
-  speed itself over the last three downloads; you can type your own. "Don't
-  keep lighter than" — two thresholds, for photos and videos: what is lighter
-  is not kept but downloaded anew for every show (videos — streamed). Sound is
+  above the network speed and skipped if it is. Since 1.5 the bitrate comes
+  first: a video whose bitrate is at most 70 % of the network speed is
+  streamed and not kept, so the storage stays for what cannot be shown
+  without it; an evicted video is not downloaded again for "Don't
+  re-download" days (7), otherwise the drive would act as a one-show buffer.
+  The frame measures the network speed over the last three downloads, but a
+  typed value is more reliable. "Don't keep photos lighter than" — what is
+  lighter is not kept but downloaded anew for every show. Sound is
   off (toggled from the remote), the duration is capped at two minutes. What
   the decoder paints as green stripes instead of a picture is skipped too, by
   the frame itself.
@@ -153,8 +157,8 @@ the app (Russian).
 | `videoSoundEnabled` | `false` | — | "Звук в видео" |
 | `downloadsDuringVideo` | `true` | — | "Закачки во время видео": turn off on a weak TV or slow internet, then video downloads pause while a video is on screen; photos are always downloaded |
 | `maxFileBytes` | 2 GB | 0 … 64 GB | "Файл не тяжелее": heavier is skipped without downloading; 0 — no limit (old key `videoMaxSizeBytes` accepted) |
-| `minStorePhotoBytes` | 0 | 0 … 1 GB | "Не хранить легче", the "фото" slider: a lighter photo is not put into storage and is downloaded anew for every show; 0 — keep all |
-| `minStoreVideoBytes` | 0 | 0 … 64 GB | "Не хранить легче", the "видео" slider: a lighter video is streamed on every show; 0 — keep all |
+| `minStorePhotoBytes` | 0 | 0 … 1 GB | "Не хранить снимки легче": a lighter photo is not put into storage and is downloaded anew for every show; 0 — keep all |
+| `redownloadAfterDays` | 7 | 0 … 365 | "Не перекачивать": an evicted video is not downloaded again for that many days; 0 — at once |
 | `showClock` | `true` | — | "Часы" |
 | `pauseAutoResumeMillis` | 600 000 (10 min) | 0 … 24 h | "Снимать с паузы через": after how long the pause lifts itself; 0 — never |
 | `showDate` | `true` | — | "Дата съёмки": month and year in the photo corner |
@@ -163,7 +167,7 @@ the app (Russian).
 | `storageBytes` | 2 GB | 0 … disk size | "Объём хранилища": how much space to take for photos and videos when "По свободному месту" is off |
 | `storageByFree` | `false` | — | "По свободному месту": take all free space minus the reserve |
 | `storageReserveBytes` | 1 GB | 0 … 1 TB | "Запас": how much free space to leave alone with "По свободному месту" (old key `externalReserveBytes` accepted) |
-| `networkBps` | 0 | 0 … 2 Gbit/s | "Скорость сети": 0 — auto, the average of the last three downloads; otherwise the typed value decides |
+| `networkBps` | 0 | 0 … 2 Gbit/s | "Скорость сети": 0 — auto, the average of the last three downloads; otherwise the typed value decides. A video at or below 70 % of it is streamed without storing |
 | `prefetchCount` | 10 | 1 … 50 | "Подгружать заранее": how many slides ahead to prepare; a long video download does not hold the queue |
 | `indexRefreshIntervalMillis` | 1.5 h | 1 min … 3 h | "Проверять Я.Диск": how often to rescan the folder; Disk links live about three hours |
 

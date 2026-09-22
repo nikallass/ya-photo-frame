@@ -69,7 +69,7 @@ class SettingsReceiver : BroadcastReceiver() {
             "storageReserveBytes", "externalReserveBytes" ->
                 raw.toLongOrNull()?.let { settings.copy(storageReserveBytes = it) }
             "minStorePhotoBytes" -> raw.toLongOrNull()?.let { settings.copy(minStorePhotoBytes = it) }
-            "minStoreVideoBytes" -> raw.toLongOrNull()?.let { settings.copy(minStoreVideoBytes = it) }
+            "redownloadAfterDays" -> raw.toIntOrNull()?.let { settings.copy(redownloadAfterDays = it) }
             "maxFileBytes", "videoMaxSizeBytes" -> raw.toLongOrNull()?.let { settings.copy(maxFileBytes = it) }
             "networkBps" -> raw.toLongOrNull()?.let { settings.copy(networkBps = it) }
             "prefetchCount" -> raw.toIntOrNull()?.let { settings.copy(prefetchCount = it) }

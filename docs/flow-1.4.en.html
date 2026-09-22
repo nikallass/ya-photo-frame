@@ -45,7 +45,7 @@
 
 <div class="page">
   <h2>Sheet 2. The path of a photo and a video from the prefetch window to the screen (steps C–G)</h2>
-  <svg id="p2" viewBox="0 0 1040 720"></svg>
+  <svg id="p2" viewBox="0 0 1040 830"></svg>
 </div>
 
 <div class="page">
@@ -66,13 +66,14 @@
     <tr><td>Sound in video, Portraits in pairs, Skip small ones, New more often, Clock, Capture date</td><td>as before</td><td>Unchanged.</td></tr>
     <tr><td>Video no longer than</td><td>2 min</td><td>After that the frame moves to the next slide. Zero — to the end.</td></tr>
     <tr><td>File no heavier than</td><td>2 GB</td><td>A heavier file is skipped: not downloaded, not streamed, not shown. Zero — no limit.</td></tr>
-    <tr><td>Don’t keep lighter than</td><td>photo 0, video 0</td><td>One row, two sliders “photo” and “video”. A lighter photo is downloaded anew for every show, a lighter video is streamed. Zero — keep all.</td></tr>
+    <tr><td>Don’t keep photos lighter than</td><td>0</td><td>A lighter photo is downloaded anew for every show. Zero — keep all. Videos are kept or streamed by bitrate.</td></tr>
     <tr><td>Downloads during video</td><td>on</td><td>Off stops downloads while a video is on screen.</td></tr>
     <tr><td colspan="3" style="color:#777">The “What to show” and “Video” sections merged.</td></tr>
     <tr><td colspan="3" style="color:#777">Wording unified: “video” everywhere.</td></tr>
-    <tr><td rowspan="5">Storage</td><td>Storage place</td><td>TV memory</td><td>TV memory or an inserted flash drive. A drive is checked with a test write.</td></tr>
+    <tr><td rowspan="6">Storage</td><td>Storage place</td><td>TV memory</td><td>TV memory or an inserted flash drive. A drive is checked with a test write.</td></tr>
     <tr><td>Storage capacity</td><td>memory: 2 GB; drive: by free space, reserve 1 GB</td><td>One row: a slider from 0 to the disk size and a “By free space” toggle. Off — the slider sets the capacity. On — the same slider becomes the “Reserve”: how much free space to leave alone, the rest is taken.</td></tr>
-    <tr><td>Network speed</td><td>auto</td><td>The average of the last three downloads; can be typed in, then the typed value decides.</td></tr>
+    <tr><td>Network speed</td><td>auto</td><td>The average of the last three downloads; can be typed in, then the typed value decides. A video at or below 70 % of it is streamed without storing.</td></tr>
+    <tr><td>Don’t re-download</td><td>7 days</td><td>An evicted video is not downloaded again for that many days: streamed if the network copes, otherwise skipped.</td></tr>
     <tr><td>Prefetch ahead</td><td>10</td><td>How many files ahead the queue is prepared. A long video download does not stop the queue.</td></tr>
     <tr><td>Check Yandex Disk</td><td>1.5 h</td><td>Unchanged.</td></tr>
     <tr><td>Removed</td><td colspan="3">“Photo cache”, “Video to cache up to”, “Video buffer”, “Network speed to Disk” in its old meaning, “Video no heavier than” (becomes “File no heavier than”), “Space reserve” (becomes the reserve in the “Storage capacity” row).</td></tr>
@@ -163,57 +164,59 @@ function edge(svg, a, sa, b, sb, label, way, seg) {
   const start = node(s, { x: 520, y: 30, w: 300, h: 40, text: 'A file entered the prefetch window', kind: 'box', bold: true });
   const kind = node(s, { x: 520, y: 100, w: 240, h: 50, text: 'Photo or video?', kind: 'decision' });
   // Снимок (слева)
-  const pLight = node(s, { x: 180, y: 190, w: 300, h: 60, text: 'Lighter than the “photo” threshold\nin “Don’t keep lighter than”?', kind: 'decision' });
-  const pTemp = node(s, { x: 180, y: 290, w: 220, h: 56, text: 'Download to a temporary file,\nshow, delete', kind: 'box' });
+  const pLight = node(s, { x: 180, y: 190, w: 300, h: 60, text: 'Lighter than\n“Don’t keep photos lighter than”?', kind: 'decision' });
+  const pTemp = node(s, { x: 180, y: 290, w: 220, h: 56, text: 'Download to a temporary file,\nshow, delete', kind: 'terminal' });
   const pHave = node(s, { x: 180, y: 390, w: 240, h: 50, text: 'Already in storage?', kind: 'decision' });
   const pFree = node(s, { x: 180, y: 500, w: 220, h: 44, text: 'Make room (D)', kind: 'store' });
   const pGet = node(s, { x: 180, y: 600, w: 220, h: 44, text: 'Download the copy into storage', kind: 'store' });
-  const pShow = node(s, { x: 420, y: 600, w: 180, h: 44, text: 'Show the photo', kind: 'terminal' });
+  const pShow = node(s, { x: 180, y: 690, w: 180, h: 44, text: 'Show the photo', kind: 'terminal' });
   // Видео (справа)
   const vOn = node(s, { x: 700, y: 170, w: 230, h: 50, text: '“Video” on?', kind: 'decision' });
   const vBig = node(s, { x: 700, y: 245, w: 250, h: 56, text: 'Heavier than\n“File no heavier than”?', kind: 'decision' });
   const vHead = node(s, { x: 700, y: 325, w: 250, h: 56, text: 'Read the header (2 requests):\nduration, bitrate, profile → index', kind: 'box' });
   const vDec = node(s, { x: 700, y: 405, w: 260, h: 50, text: 'Profile decodable?', kind: 'decision' });
-  const vLight = node(s, { x: 700, y: 480, w: 300, h: 60, text: 'Lighter than the “video” threshold\nin “Don’t keep lighter than”?', kind: 'decision' });
-  const vHave = node(s, { x: 700, y: 560, w: 240, h: 50, text: 'Already in storage?', kind: 'decision' });
-  const vFit = node(s, { x: 935, y: 560, w: 200, h: 60, text: 'Fits the\nstorage capacity?', kind: 'decision' });
-  const vFree = node(s, { x: 935, y: 630, w: 180, h: 44, text: 'Make room (D)', kind: 'store' });
-  const vDl = node(s, { x: 935, y: 690, w: 200, h: 44, text: 'Download whole, one at a time;\n“waiting for download” in the queue', kind: 'store' });
-  const vNet = node(s, { x: 470, y: 480, w: 210, h: 60, text: 'Bitrate ≤\nnetwork speed?', kind: 'decision' });
-  const vStream = node(s, { x: 470, y: 400, w: 190, h: 44, text: 'Play as a stream', kind: 'terminal' });
-  const vShow = node(s, { x: 580, y: 690, w: 220, h: 44, text: 'Show from storage\nat the next slide change', kind: 'terminal' });
+  const vHave = node(s, { x: 700, y: 480, w: 240, h: 50, text: 'Already in storage?', kind: 'decision' });
+  const vLight = node(s, { x: 700, y: 560, w: 260, h: 60, text: 'Bitrate ≤ 70 %\nof network speed?', kind: 'decision' });
+  const vEv = node(s, { x: 700, y: 640, w: 260, h: 60, text: 'Evicted less than\n“Don’t re-download” days ago?', kind: 'decision' });
+  const vFit = node(s, { x: 950, y: 640, w: 190, h: 60, text: 'Fits the\nstorage capacity?', kind: 'decision' });
+  const vFree = node(s, { x: 950, y: 700, w: 180, h: 44, text: 'Make room (D)', kind: 'store' });
+  const vDl = node(s, { x: 950, y: 760, w: 200, h: 44, text: 'Download whole, one at a time;\n“waiting for download” in the queue', kind: 'store' });
+  const vNet = node(s, { x: 440, y: 640, w: 200, h: 60, text: 'Bitrate ≤\nnetwork speed (barely)?', kind: 'decision' });
+  const vStream = node(s, { x: 440, y: 560, w: 200, h: 44, text: 'Play as a stream,\ndo not keep', kind: 'terminal' });
+  const vShow = node(s, { x: 580, y: 760, w: 220, h: 44, text: 'Show from storage\nat the next slide change', kind: 'terminal' });
   const sk1 = node(s, { x: 940, y: 170, w: 170, h: 44, text: 'Skip', kind: 'skip' });
   const sk2 = node(s, { x: 940, y: 245, w: 170, h: 44, text: 'Skip,\ndiary “over the threshold”', kind: 'skip' });
   const sk3 = node(s, { x: 940, y: 405, w: 190, h: 44, text: 'Mark undecodable,\nremove from the queue', kind: 'skip' });
-  const sk5 = node(s, { x: 470, y: 320, w: 190, h: 44, text: 'Skip,\n“heavier than the network”', kind: 'skip' });
+  const sk5 = node(s, { x: 440, y: 320, w: 190, h: 44, text: 'Skip,\n“heavier than the network”', kind: 'skip' });
 
   edge(s, start, 'b', kind, 't');
   edge(s, kind, 'l', pLight, 't', 'photo', [[180, 100]]);
   edge(s, kind, 'r', vOn, 't', 'video', [[700, 100]]);
   edge(s, pLight, 'b', pTemp, 't', 'yes');
   edge(s, pLight, 'l', pHave, 'l', 'no', [[40, 190], [40, 390]], 0);
-  edge(s, pTemp, 'r', pShow, 'l', '', [[330, 290]]);
   edge(s, pHave, 'b', pFree, 't', 'no');
-  edge(s, pHave, 'r', pShow, 'l', 'yes', [[330, 390]]);
+  edge(s, pHave, 'r', pShow, 'r', 'yes', [[320, 390], [320, 690]], 0);
   edge(s, pFree, 'b', pGet, 't');
-  edge(s, pGet, 'r', pShow, 'l');
+  edge(s, pGet, 'b', pShow, 't');
   edge(s, vOn, 'r', sk1, 'l', 'no');
   edge(s, vOn, 'b', vBig, 't', 'yes');
   edge(s, vBig, 'r', sk2, 'l', 'yes');
   edge(s, vBig, 'b', vHead, 't', 'no');
   edge(s, vHead, 'b', vDec, 't');
   edge(s, vDec, 'r', sk3, 'l', 'no');
-  edge(s, vDec, 'b', vLight, 't', 'yes');
-  edge(s, vLight, 'l', vNet, 'r', 'yes');
-  edge(s, vLight, 'b', vHave, 't', 'no');
-  edge(s, vHave, 'r', vFit, 'l', 'no');
-  edge(s, vHave, 'b', vShow, 't', 'yes', [[700, 620], [580, 620]], 0);
+  edge(s, vDec, 'b', vHave, 't', 'yes');
+  edge(s, vHave, 'l', vShow, 't', 'yes', [[555, 480], [555, 725], [580, 725]], 0);
+  edge(s, vHave, 'b', vLight, 't', 'no');
+  edge(s, vLight, 'l', vStream, 'r', 'yes');
+  edge(s, vLight, 'b', vEv, 't', 'no');
+  edge(s, vEv, 'l', vNet, 'r', 'yes');
+  edge(s, vEv, 'r', vFit, 'l', 'no');
   edge(s, vFit, 'b', vFree, 't', 'yes');
   edge(s, vFree, 'b', vDl, 't');
   edge(s, vDl, 'l', vShow, 'r', 'downloaded');
-  edge(s, vFit, 'r', vNet, 't', 'no', [[1036, 560], [1036, 445], [470, 445]], 0);
+  edge(s, vFit, 'r', vNet, 'b', 'no', [[1062, 640], [1062, 805], [440, 805]], 0);
   edge(s, vNet, 't', vStream, 'b', 'yes');
-  edge(s, vNet, 'l', sk5, 'b', 'no', [[365, 480], [365, 362], [470, 362]], 0);
+  edge(s, vNet, 'l', sk5, 'b', 'no', [[345, 640], [345, 362], [440, 362]], 0);
 })();
 
 // ───────── Лист 3: место и скорость ─────────

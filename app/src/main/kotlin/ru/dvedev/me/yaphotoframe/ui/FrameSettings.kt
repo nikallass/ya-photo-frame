@@ -131,8 +131,14 @@ data class FrameSettings(
      */
     val minStorePhotoBytes: Long = 0L,
 
-    /** Видео легче стольких байт не хранятся, а играют потоком; ноль — хранить все. */
-    val minStoreVideoBytes: Long = 0L,
+    /**
+     * Сколько дней вытесненное из хранилища видео не качается снова.
+     *
+     * Видео в библиотеке больше, чем помещается на флешку, и без этого
+     * срока она работала бы буфером на один показ: скачали, показали,
+     * вытеснили, через сутки скачали снова. Ноль — качать сразу.
+     */
+    val redownloadAfterDays: Int = 7,
 
     /**
      * Файл тяжелее стольких байт рамка пропускает: не качает, не стримит, не
@@ -258,7 +264,7 @@ data class FrameSettings(
         "storageByFree" to storageByFree,
         "storageReserveBytes" to storageReserveBytes,
         "minStorePhotoBytes" to minStorePhotoBytes,
-        "minStoreVideoBytes" to minStoreVideoBytes,
+        "redownloadAfterDays" to redownloadAfterDays,
         "maxFileBytes" to maxFileBytes,
         "networkBps" to networkBps,
         "prefetchCount" to prefetchCount,

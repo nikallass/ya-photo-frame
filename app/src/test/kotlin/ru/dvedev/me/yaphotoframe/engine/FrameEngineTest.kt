@@ -715,6 +715,7 @@ class FrameEngineTest {
     /** Хранилище теста — в отдельной папке, с объёмом из [capacity]. */
     private fun storage(): Storage = storage ?: Storage(
         root = cacheDirectory, place = Storage.Place.TvMemory, capacity = { capacity }, clock = { now },
+        onEvicted = { key -> engines.forEach { it.noteEvicted(key) } },
     ).also { storage = it }
 
     private val gauge = NetworkGauge()
@@ -732,7 +733,7 @@ class FrameEngineTest {
         networkBps: Long = 0L,
         maxFileBytes: Long = 0L,
         minStorePhotoBytes: Long = 0L,
-        minStoreVideoBytes: Long = 0L,
+        redownloadAfterDays: Int = 0,
         decodable: (String) -> Boolean = { true },
         storage: () -> Storage = ::storage,
     ) = FrameEngine(
@@ -760,7 +761,7 @@ class FrameEngineTest {
         networkBps = { networkBps },
         maxFileBytes = { maxFileBytes },
         minStorePhotoBytes = { minStorePhotoBytes },
-        minStoreVideoBytes = { minStoreVideoBytes },
+        redownloadAfterDays = { redownloadAfterDays },
         gauge = gauge,
         decodable = decodable,
         onDownload = { events += it },
@@ -851,12 +852,12 @@ class FrameEngineTest {
     }
 
     @Test
-    fun `«не хранить легче» — снимок во времянку, видео потоком`() = runTest {
+    fun `«не хранить снимки легче» — снимок во времянку, а видео, которое тянет сеть, — потоком`() = runTest {
         switchToCacheFolder()
         val engine = library(
             pageLimit = 50, includeVideo = true, prober = prober(*headers), networkBps = 50_000_000L,
-            // Снимки по 900 КБ, лёгкое видео 20 МБ — оба легче порогов.
-            minStorePhotoBytes = 1L shl 20, minStoreVideoBytes = 50L shl 20,
+            // Снимки по 900 КБ — легче порога; лёгкое видео 17 Мбит/с — ниже 70 % сети.
+            minStorePhotoBytes = 1L shl 20,
         )
         engine.sync()
         engine.awaitProbing()
@@ -868,8 +869,57 @@ class FrameEngineTest {
         val scratch = File(temporaryFolder.root, "scratch").listFiles().orEmpty().filter { it.isFile }
         assertTrue("и лежит там, а не в хранилище", scratch.isNotEmpty() && cachedNames().isEmpty())
         val light = engine.entries.single { it.item.name == "лёгкое.mp4" }.item
-        assertTrue("видео легче порога — потоком", engine.deliver(light) is Delivery.Streamed)
+        assertTrue("сеть тянет с запасом — потоком, хоть и помещается", engine.deliver(light) is Delivery.Streamed)
         assertFalse(videoFile("лёгкое.mp4").exists())
+    }
+
+    @Test
+    fun `битрейт у границы сети — хранить, а уже скачанное играет с диска при любой сети`() = runTest {
+        switchToCacheFolder()
+        // Лёгкое 17 Мбит/с при сети 20: выше 70 %, но ниже 100 % — хранить.
+        val engine = library(pageLimit = 50, includeVideo = true, prober = prober(*headers), networkBps = 20_000_000L)
+        engine.sync()
+        engine.awaitProbing()
+        val light = engine.entries.single { it.item.name == "лёгкое.mp4" }.item
+        assertTrue("до закачки ждёт", engine.waiting(light))
+        engine.prefetch()
+        engine.awaitDownload()
+        assertTrue(videoFile("лёгкое.mp4").isFile)
+
+        // Сеть стала быстрой — скачанное всё равно играет с диска.
+        val fast = library(pageLimit = 50, includeVideo = true, prober = prober(*headers), networkBps = 500_000_000L)
+        assertTrue(fast.deliver(light) is Delivery.Local)
+    }
+
+    @Test
+    fun `вытесненное видео не качается снова, пока не вышел срок «Не перекачивать»`() = runTest {
+        switchToCacheFolder()
+        val engine = library(pageLimit = 50, includeVideo = true, prober = prober(*headers), redownloadAfterDays = 7)
+        engine.sync()
+        engine.awaitProbing()
+        engine.prefetch()
+        engine.awaitDownload()
+        assertTrue(videoFile("лёгкое.mp4").isFile)
+        val light = engine.entries.single { it.item.name == "лёгкое.mp4" }.item
+
+        // Место кончилось — видео вытеснено ради снимков.
+        capacity = Storage.Capacity.Fixed(2L * (BYTES_PER_MICRO + BYTES_PER_FULL))
+        engine.prefetch()
+        assertFalse(videoFile("лёгкое.mp4").exists())
+        assertEquals("отмечено, когда ушло", now, engine.entries.single { it.item.name == "лёгкое.mp4" }.evictedAtMillis)
+
+        capacity = Storage.Capacity.Fixed(1L shl 30)
+        engine.prefetch()
+        engine.awaitDownload()
+        assertFalse("срок не вышел — не качается", videoFile("лёгкое.mp4").exists())
+        assertTrue("и в очереди его нет: сеть не измерена, потоком нельзя", engine.upcoming().none { it.name == "лёгкое.mp4" })
+
+        now += 8L * 24 * 60 * 60 * 1000
+        // Очередь занята снимками — листаем, пока видео не встанет в неё и не скачается.
+        repeat(8) { engine.prefetch(); engine.awaitDownload(); engine.advance() }
+        assertTrue("срок вышел — скачано снова", videoFile("лёгкое.mp4").isFile)
+        assertNull("и отметка снята", engine.entries.single { it.item.name == "лёгкое.mp4" }.evictedAtMillis)
+        assertTrue(engine.deliver(light) is Delivery.Local)
     }
 
     @Test
@@ -967,7 +1017,8 @@ class FrameEngineTest {
     fun `сорвавшаяся закачка не держит видео в очереди — оно идёт потоком`() = runTest {
         switchToCacheFolder()
         downloadsFail = true
-        val engine = library(pageLimit = 50, includeVideo = true, prober = prober(*headers), networkBps = 50_000_000L)
+        // Сеть 20 Мбит/с: лёгкое (17) выше 70 % — идёт в хранилище, но впритык тянется потоком.
+        val engine = library(pageLimit = 50, includeVideo = true, prober = prober(*headers), networkBps = 20_000_000L)
         engine.sync()
         engine.awaitProbing()
         engine.prefetch()

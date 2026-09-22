@@ -18,7 +18,7 @@ class FrameSettingsSanitizeTest {
             storageBytes = -1,
             storageReserveBytes = -5,
             minStorePhotoBytes = -1,
-            minStoreVideoBytes = -1,
+            redownloadAfterDays = -1,
             maxFileBytes = -1,
             networkBps = -1,
         ).sanitized()
@@ -26,7 +26,7 @@ class FrameSettingsSanitizeTest {
         assertEquals(0L, sanitized.storageBytes)
         assertEquals(0L, sanitized.storageReserveBytes)
         assertEquals(0L, sanitized.minStorePhotoBytes)
-        assertEquals(0L, sanitized.minStoreVideoBytes)
+        assertEquals(0, sanitized.redownloadAfterDays)
         assertEquals(0L, sanitized.maxFileBytes)
         assertEquals(0L, sanitized.networkBps)
     }

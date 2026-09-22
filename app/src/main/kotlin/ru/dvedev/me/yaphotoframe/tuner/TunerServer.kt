@@ -366,7 +366,7 @@ class TunerServer(
                 storageReserveBytes = (values["storageReserveBytes"] ?: values["externalReserveBytes"])?.toLongOrNull()
                     ?: current.storageReserveBytes,
                 minStorePhotoBytes = values["minStorePhotoBytes"]?.toLongOrNull() ?: current.minStorePhotoBytes,
-                minStoreVideoBytes = values["minStoreVideoBytes"]?.toLongOrNull() ?: current.minStoreVideoBytes,
+                redownloadAfterDays = values["redownloadAfterDays"]?.toIntOrNull() ?: current.redownloadAfterDays,
                 maxFileBytes = (values["maxFileBytes"] ?: values["videoMaxSizeBytes"])?.toLongOrNull()
                     ?: current.maxFileBytes,
                 networkBps = values["networkBps"]?.toLongOrNull() ?: current.networkBps,

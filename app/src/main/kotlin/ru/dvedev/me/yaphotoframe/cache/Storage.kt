@@ -35,6 +35,8 @@ class Storage(
     /** Свободное и полное место на диске хранилища — подменяются в тестах. */
     private val usableSpace: () -> Long = { root.usableSpace },
     private val totalSpace: () -> Long = { root.totalSpace },
+    /** Ключ файла, вытесненного ради места, — движок помнит, что и когда ушло. */
+    private val onEvicted: (String) -> Unit = {},
 ) {
 
     /** Где хранилище: память телевизора или флешка с меткой. */
@@ -171,6 +173,10 @@ class Storage(
 
     fun videoKey(path: String): String = VIDEOS + "/" + path.trimStart('/')
 
+    /** Путь на Диске по ключу видео; null — это не видео. */
+    fun videoPathOf(key: String): String? =
+        if (key.startsWith("$VIDEOS/")) "/" + key.removePrefix("$VIDEOS/") else null
+
     // ── файлы ──
 
     /** Пока список ещё не прочитан, спрашиваем у диска напрямую — это один stat, а не обход. */
@@ -283,6 +289,7 @@ class Storage(
                     noteRemoved(key)
                     used -= entry.bytes
                     usable += entry.bytes
+                    onEvicted(key)
                 }
             }
             return roomFor(bytes, used, usable)
@@ -305,6 +312,7 @@ class Storage(
                 used -= entry.bytes
                 usable += entry.bytes
                 removed++
+                onEvicted(key)
             }
         }
         removed

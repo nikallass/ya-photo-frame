@@ -77,7 +77,8 @@ class FrameEngine(
     private val selection: () -> FolderSelection = { FolderSelection.ALL },
     private val maxFileBytes: () -> Long = { 0L },
     private val minStorePhotoBytes: () -> Long = { 0L },
-    private val minStoreVideoBytes: () -> Long = { 0L },
+    /** Сколько дней вытесненное видео не качается снова; ноль — качать сразу. */
+    private val redownloadAfterDays: () -> Int = { 0 },
     private val networkBps: () -> Long = { 0L },
     private val gauge: NetworkGauge = NetworkGauge(),
     private val prober: DurationProber = DurationProber.NONE,
@@ -159,6 +160,12 @@ class FrameEngine(
 
     /** Битрейт видео, если заголовок уже прочитан. */
     fun bitrateOf(path: String): Long? = entryOf(path)?.bitrateBps
+
+    /** Хранилище вытеснило файл: если это видео, запомнить, чтобы не качать снова раньше срока. */
+    fun noteEvicted(key: String) {
+        val path = storage().videoPathOf(key) ?: return
+        library.recordEvicted(path, clock())
+    }
 
     /** Декодер не берёт видео: пометить в индексе и убрать из очереди. */
     suspend fun markUndecodable(path: String) {
@@ -503,6 +510,7 @@ class FrameEngine(
         if (max > 0 && item.sizeBytes > max) return "тяжелее порога «Файл не тяжелее»"
         val entry = entryOf(item.path)
         if (entry?.undecodable == true) return "телевизор не декодирует"
+        if (entry != null && recentlyEvicted(entry)) return "вытеснено недавно, срок «Не перекачивать» не вышел"
         return "не помещается в хранилище и тяжелее сети"
     }
 
@@ -557,6 +565,8 @@ class FrameEngine(
         }
         val started = clock()
         val file = fetcher.ensure(store, key, source.downloadUrl(item), onProgress) { preparing.get() > 0 }
+        // Скачано заново — срок «не перекачивать» снят.
+        if (entryOf(item.path)?.evictedAtMillis != null) library.recordEvicted(item.path, null)
         // Замер честный только для закачки, которая не стояла за кадрами;
         // иначе он занижен, но в сторону осторожности — это допустимо.
         gauge.record(item.sizeBytes, clock() - started)
@@ -651,20 +661,34 @@ class FrameEngine(
         val entry = entryOf(item.path)
         if (entry?.undecodable == true) return Plan.Skip
         if (entry?.durationMillis == null) return Plan.Probe
-        if (synchronized(downloadLock) { item.path in downloadFailed }) return streamOrSkip(entry)
-        val min = minStoreVideoBytes()
-        if (min > 0 && item.sizeBytes < min) return streamOrSkip(entry)
         val store = storage()
+        // Уже лежит — играть с диска, что бы ни говорил битрейт.
         if (store.has(store.videoKey(item.path))) return Plan.Store
+        if (synchronized(downloadLock) { item.path in downloadFailed }) return streamOrSkip(entry)
+        // Сеть тянет с запасом — потоком, ничего не сохраняя: хранилище
+        // остаётся под то, что без него не показать.
+        if (streamable(entry, STREAM_SHARE)) return Plan.Stream
+        if (recentlyEvicted(entry)) return streamOrSkip(entry)
         if (store.fits(item.sizeBytes)) return Plan.Store
         return streamOrSkip(entry)
     }
 
-    /** Потоком, если сеть тянет битрейт; пока сеть не измерена, считается медленной. */
-    private fun streamOrSkip(entry: LibraryEntry): Plan {
-        val network = effectiveNetworkBps() ?: return Plan.Skip
-        val bitrate = entry.bitrateBps ?: return Plan.Skip
-        return if (bitrate <= network) Plan.Stream else Plan.Skip
+    /** Битрейт не выше доли скорости сети; неизмеренная сеть — медленная. */
+    private fun streamable(entry: LibraryEntry, share: Double): Boolean {
+        val network = effectiveNetworkBps() ?: return false
+        val bitrate = entry.bitrateBps ?: return false
+        return bitrate <= network * share
+    }
+
+    /** Потоком, если сеть тянет битрейт хоть впритык, иначе пропуск. */
+    private fun streamOrSkip(entry: LibraryEntry): Plan =
+        if (streamable(entry, 1.0)) Plan.Stream else Plan.Skip
+
+    /** Вытеснено недавно — качать заново пока не стоит. */
+    private fun recentlyEvicted(entry: LibraryEntry): Boolean {
+        val days = redownloadAfterDays()
+        val at = entry.evictedAtMillis ?: return false
+        return days > 0 && clock() - at < days * DAY_MILLIS
     }
 
     /** Обе копии снимка — кадр и фон под него — в хранилище; размер запоминается. */
@@ -761,6 +785,11 @@ class FrameEngine(
     private companion object {
         /** Сколько места просить под копию снимка: пара сотен килобайт с запасом. */
         const val PREVIEW_ROOM_BYTES = 2L * 1024 * 1024
+
+        /** Потоком без сохранения — если битрейт не выше такой доли сети: у самой границы заикается. */
+        const val STREAM_SHARE = 0.7
+
+        const val DAY_MILLIS = 24L * 60 * 60 * 1000
     }
 }
 

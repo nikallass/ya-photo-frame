@@ -84,6 +84,7 @@ class LibraryStore(private val file: File) {
         @SerialName("duration_ms") val durationMillis: Long? = null,
         val codec: String? = null,
         val undecodable: Boolean = false,
+        @SerialName("evicted_at") val evictedAtMillis: Long? = null,
     )
 
     private fun StoredLibrary.toSnapshot() = LibrarySnapshot(
@@ -106,6 +107,7 @@ class LibraryStore(private val file: File) {
                 durationMillis = stored.durationMillis,
                 codec = stored.codec,
                 undecodable = stored.undecodable,
+                evictedAtMillis = stored.evictedAtMillis,
             )
         },
     )
@@ -128,6 +130,7 @@ class LibraryStore(private val file: File) {
                 durationMillis = entry.durationMillis,
                 codec = entry.codec,
                 undecodable = entry.undecodable,
+                evictedAtMillis = entry.evictedAtMillis,
             )
         },
     )

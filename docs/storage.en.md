@@ -39,7 +39,7 @@ Section **"Media files"**:
 | Clock, Capture date | `showClock`, `showDate` | on | Over the frame. |
 | Video no longer than | `videoMaxDurationMillis` | 2 min | After that the frame moves to the next slide. Zero — play to the end. |
 | **File no heavier than** | `maxFileBytes` | 2 GB | A file heavier than the threshold is skipped: not downloaded, not streamed, not shown. Zero — no limit. |
-| **Don't keep lighter than** | `minStorePhotoBytes`, `minStoreVideoBytes` | photo 0, video 0 | One row, two sliders. A photo lighter than the "photo" threshold is not put into storage but downloaded anew for every show; a video lighter than the "video" threshold is streamed on every show. Zero — keep everything. Photo copies weigh about 200 KB: a higher threshold turns off keeping photos, and the frame has nothing to show without network. |
+| **Don't keep photos lighter than** | `minStorePhotoBytes` | 0 | A photo lighter than the threshold is not put into storage but downloaded anew for every show. Zero — keep everything. Photo copies weigh about 200 KB: a higher threshold turns off keeping photos, and the frame has nothing to show without network. Videos are not affected — a video is kept or streamed by bitrate (step F). |
 | Downloads during video | `downloadsDuringVideo` | on | Off stops video downloads while a video is on screen; photos are always downloaded. |
 
 Section **"Storage"**:
@@ -48,7 +48,8 @@ Section **"Storage"**:
 |---|---|---|---|
 | **Storage place** | `storageVolumeUuid` | TV memory | List: "TV memory" and the inserted flash drives. A drive is checked with a test write; unusable ones are shown in red. |
 | **Storage capacity** | `storageBytes`, `storageByFree`, `storageReserveBytes` | TV memory: 2 GB; flash: by free space, reserve 1 GB | One row: a slider from 0 to the size of the chosen disk and a "By free space" toggle. Toggle off — the slider sets the capacity. Toggle on — the same slider becomes the "Reserve". |
-| **Network speed** | `networkBps` | auto | Auto — the average of the last three downloads, shown right there. A typed value overrides the measurement; the measurement is still displayed. |
+| **Network speed** | `networkBps` | auto | Auto — the average of the last three downloads, shown right there. A typed value overrides the measurement and is more reliable: the measurement jumps from download to download. A video whose bitrate is at most 70 % of this speed is streamed and not kept. |
+| **Don't re-download** | `redownloadAfterDays` | 7 days | An evicted video is not downloaded again for that many days; until then it is streamed if the network can carry it, otherwise skipped. Zero — download at once. |
 | Prefetch ahead | `prefetchCount` | 10 | How many files ahead the frame prepares the queue. A long video download does not hold the queue. |
 | Check Yandex Disk | `indexRefreshIntervalMillis` | 1.5 h | How often to rescan the folder. |
 
@@ -70,10 +71,9 @@ in a row would leave the screen without photos.
 
 **C. Thresholds.** When a file enters the prefetch window the frame looks at
 its size first: heavier than "File no heavier than" — removed from the queue.
-A photo lighter than the "photo" threshold in "Don't keep lighter than" is
-marked "don't keep": it is downloaded into a temporary cache for the show and
-the next photos push it out; a video lighter than the "video" threshold is
-streamed. Then the frame reads the video header with two small requests and
+A photo lighter than "Don't keep photos lighter than" is marked "don't
+keep": it is downloaded into a temporary cache for the show and the next
+photos push it out. Then the frame reads the video header with two small requests and
 takes the duration, bitrate and codec profile; it records the result in the
 index so the header is never read twice. If the TV cannot decode the profile
 (on Mi TV that is 10-bit HEVC), the frame marks the video undecodable, removes
@@ -92,7 +92,13 @@ it re-reads the file list and the free space and trims its own files.
 **E. Photo.** The frame downloads the photo copy into storage and shows it
 from there.
 
-**F. Video that fits.** The frame downloads the whole video into storage, one
+**F. Video: stream or storage.** Bitrate first: if it is at most 70 % of
+the network speed the video is streamed straight from Disk and not saved —
+the storage stays for what cannot be shown without it. A video already in
+storage plays from disk at any network speed. If the video was evicted less
+than "Don't re-download" days ago, the frame does not download it again:
+streamed if the network can carry it at all, otherwise skipped. The rest goes
+into storage: the frame downloads the whole video, one
 at a time in queue order, into a temporary file renamed on completion. Until
 the video has finished downloading the show goes past it to the next slide; on
 the page it is grey with a "waiting for download" mark; the prefetch window
